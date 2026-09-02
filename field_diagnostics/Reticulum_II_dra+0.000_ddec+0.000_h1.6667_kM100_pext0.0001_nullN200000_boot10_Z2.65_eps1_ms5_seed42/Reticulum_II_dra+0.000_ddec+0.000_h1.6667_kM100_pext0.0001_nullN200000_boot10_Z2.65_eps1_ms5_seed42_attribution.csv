@@ -1,0 +1,2 @@
+gid,n,S,Bhat,S/sqrt(B),best_match,n_best,purity_known,nearest_catalog,sep_deg,ra_c,dec_c,pmra_c,pmdec_c,n_HorologiumII,TPR_HorologiumII,n_ReticulumII,TPR_ReticulumII
+0,84,84,9.64983653567938,27.040785786212496,ReticulumII,59,0.7023809523809523,Reticulum II,0.010444644104554663,53.904780514158524,-54.0461948981774,2.4045218946294904,-1.378945835972706,0,,59,0.7866666666666666
