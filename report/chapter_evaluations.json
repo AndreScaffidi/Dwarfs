@@ -1,0 +1,254 @@
+[
+ {
+  "chapter_id": "s0_1",
+  "chapter_title": "\u00a70 Purpose + \u00a71 EagleEye in brief",
+  "target_word_count": 1000,
+  "actual_word_count": 1050,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Scope claims are explicit and the non-claim (no calibrated threshold) is stated up front."
+   },
+   "citation_quality": {
+    "score": 4,
+    "notes": "Cites the parent method precisely at each inherited component."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "Self-contained summary; a non-EagleEye reader can proceed to \u00a73."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "\u00a71.4 inherited-vs-new table does the positioning work the audience needs."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "First-person plural, MNRAS register, maths displayed."
+   }
+  },
+  "issues": [
+   "Eq.9 placeholder is visible to a reader as a gap, by design"
+  ],
+  "revision_needed": "none"
+ },
+ {
+  "chapter_id": "s2",
+  "chapter_title": "\u00a72 Data, coverage and configuration",
+  "target_word_count": 850,
+  "actual_word_count": 1000,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Coverage subsection is grounded in a real incident with a quantified consequence."
+   },
+   "citation_quality": {
+    "score": 3,
+    "notes": "Gaia DR3 cited; no external citation for the cuts themselves, which are conventional."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "ADQL given verbatim; the operational rule stated as a rule."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Config table is the single source of truth and is referenced later rather than restated."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Table + code block conventions match the genre."
+   }
+  },
+  "issues": [
+   "No RUWE cut and no extinction correction are flagged but not justified quantitatively"
+  ],
+  "revision_needed": "none"
+ },
+ {
+  "chapter_id": "s3",
+  "chapter_title": "\u00a73 The multi-reference construction",
+  "target_word_count": 1100,
+  "actual_word_count": 1350,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Fisher identity stated, and the independence failure stated immediately rather than deferred."
+   },
+   "citation_quality": {
+    "score": 4,
+    "notes": "Fisher 1932 and Guth & Namjoo 2026 both load-bearing and correctly placed."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "MAD scaling verified against both runs with a derivable relation (0.5h cos d0)."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Rectification argument in 3.1 forward-references the geometric tests that depend on it."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Consistent notation with \u00a71."
+   }
+  },
+  "issues": [
+   "R_eff not computable from saved runs - stated as a gap, not hidden"
+  ],
+  "revision_needed": "none"
+ },
+ {
+  "chapter_id": "s4",
+  "chapter_title": "\u00a74 Reference handling",
+  "target_word_count": 1300,
+  "actual_word_count": 1400,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Mechanism, ceiling, algorithm, worked case - each claim has a measured instance."
+   },
+   "citation_quality": {
+    "score": 4,
+    "notes": "Battaglia 2022 and DW20 cited where the Bootes I membership count is used."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "The Bootes I case is verified arithmetic (cell 7), not an assertion."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Equalisation table gives all 8 references so the reader sees 7 untouched."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Register consistent."
+   }
+  },
+  "issues": [],
+  "revision_needed": "none"
+ },
+ {
+  "chapter_id": "s5",
+  "chapter_title": "\u00a75 Thresholding",
+  "target_word_count": 1200,
+  "actual_word_count": 1400,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Every threshold in the chain is stated with its calibration route."
+   },
+   "citation_quality": {
+    "score": 3,
+    "notes": "Largely self-contained method description; few external citations appropriate here."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "p_ext misreading called out explicitly; n_boot tail-resolution limit quantified."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Chain diagram opens the section and the subsections follow it in order."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Consistent."
+   }
+  },
+  "issues": [
+   "Gamma* sampling uncertainty at n_boot=10 is flagged but not propagated"
+  ],
+  "revision_needed": "minor"
+ },
+ {
+  "chapter_id": "s6",
+  "chapter_title": "\u00a76 Recovery of known systems",
+  "target_word_count": 1000,
+  "actual_word_count": 1100,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Both recoveries stated with TPR, purity, separation and reference support."
+   },
+   "citation_quality": {
+    "score": 4,
+    "notes": "DW20 + Battaglia as ground truth, cited."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "Batch aggregate given as context with an explicit non-comparability note."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Ret II then Bootes II; the Bootes I contamination case lands where \u00a74 set it up."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Tables match genre conventions."
+   }
+  },
+  "issues": [],
+  "revision_needed": "none"
+ },
+ {
+  "chapter_id": "s7",
+  "chapter_title": "\u00a77 Unidentified overdensity",
+  "target_word_count": 800,
+  "actual_word_count": 1250,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Presented as candidate not detection; the two weaknesses are given their own subsection before the robustness result."
+   },
+   "citation_quality": {
+    "score": 4,
+    "notes": "Prior interpretations cited as ruled out."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "Edge-truncation consequence spelled out in both directions."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Properties, weaknesses, scan, ruled-out - the order a sceptical reader needs."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Caveated register throughout."
+   }
+  },
+  "issues": [
+   "Identity with the 27-star cluster asserted as probable, not established - flagged in text and in \u00a79"
+  ],
+  "revision_needed": "none"
+ },
+ {
+  "chapter_id": "s8_9",
+  "chapter_title": "\u00a78 Calibration (PARTIAL) + \u00a79 Open items",
+  "target_word_count": 750,
+  "actual_word_count": 1100,
+  "evaluation": {
+   "argument_quality": {
+    "score": 4,
+    "notes": "Stub is honest: each null says what it cannot answer; the consequence for \u00a77 is stated."
+   },
+   "citation_quality": {
+    "score": 3,
+    "notes": "Few citations, appropriate for a status section."
+   },
+   "clarity_readability": {
+    "score": 4,
+    "notes": "The stack/pool caveat explicitly notes the candidate sits in the regime where stacking did worse."
+   },
+   "structure_flow": {
+    "score": 4,
+    "notes": "Missing-measurements list is concrete and actionable."
+   },
+   "platform_conformity": {
+    "score": 4,
+    "notes": "Marked PARTIAL in the header as intended."
+   }
+  },
+  "issues": [
+   "By design incomplete - not a defect"
+  ],
+  "revision_needed": "none"
+ }
+]

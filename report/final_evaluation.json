@@ -1,0 +1,74 @@
+{
+ "paper_title": "Multi-Reference EagleEye for Stellar Overdensity Detection in Gaia",
+ "total_word_count": 9311,
+ "target_platform": "Internal collaborator report (MNRAS-compatible architecture)",
+ "evaluation_date": "2026-09-20",
+ "evaluation": {
+  "overall_argument_quality": {
+   "score": 9,
+   "notes": "The two stated core concepts - persistence across empirical references, and reference contamination - are each defined, mechanised, and demonstrated on real data. The scope limit (no calibrated threshold) is declared in S0, restated where the statistic is defined (S5.4) and again in S8.3, so no claim outruns the evidence. Not 10: the report is a component description by design and carries no single organising thesis, a deliberate omission carried over from the outline stage."
+  },
+  "literature_integration": {
+   "score": 7,
+   "citation_count": 14,
+   "notes": "14 references against an adapted target of 15-25 for an internal report. All load-bearing works are present and correctly placed: EagleEye for every inherited component, DW20 and Battaglia+22 as ground truth, Fisher 1932 for the combination identity, Guth & Namjoo 2026 for the correlated-combination hazard, DPA/dadapy for the clustering stage. Thin on positioning against the wider satellite-search literature - Darragh-Ford 2021 is cited but not engaged with, which is acceptable internally and will not be for the MNRAS version."
+  },
+  "clarity_accessibility": {
+   "score": 9,
+   "notes": "S1 makes the document self-contained for a reader outside the EagleEye group. Each mechanism is stated before the measurement that demonstrates it. Every threshold is traceable through the S5 chain. Tables carry the numbers rather than prose."
+  },
+  "originality_contribution": {
+   "score": 8,
+   "notes": "S1.4 draws the inherited-vs-new boundary explicitly, which was the audience's main need. Capped below 9 because one contribution - the estimator implementation item - is withheld pending discussion with the co-authors, and because R_eff, the strongest available claim about what stacking buys, could not be computed from the saved runs."
+  },
+  "methodological_rigor": {
+   "score": 9,
+   "notes": "Configuration table gives all three runs with an explicit non-comparability warning. The coverage failure mode is documented with its quantified consequence and the guard that now prevents it. Limits are stated where they bite: Gamma* rests on 20-30 null values at n_boot=10; the anomaly is supported by 2 of 8 references and touches two tile edges; the stack/pool numbers rest on 2 trials per cell. The Bootes I cell assignment and the MAD = 0.5h cos(dec) relation were both verified numerically rather than asserted."
+  },
+  "structure_organization": {
+   "score": 9,
+   "notes": "Mechanism -> algorithm -> demonstration ordering holds throughout. S7 places the two weaknesses before the robustness result rather than after it. Section order is MNRAS-compatible so the document can grow into the paper. S2 at 1000 words slightly overruns its 850 allocation; S7 at 1250 overruns 800 because the edge-truncation finding was not anticipated at outline stage."
+  },
+  "platform_conformity": {
+   "score": 9,
+   "notes": "First-person plural, MNRAS register, author-year citations, displayed mathematics, tables for quantitative content. Calibration section marked PARTIAL in its own header as intended. Figures symlinked into report/figures/ with a manifest."
+  }
+ },
+ "completeness_checklist": {
+  "structural": {
+   "abstract": false,
+   "introduction": true,
+   "main_chapters": true,
+   "conclusion": false,
+   "references": true
+  },
+  "content": {
+   "promises_fulfilled": true,
+   "claims_supported": true,
+   "terms_defined": true,
+   "objections_addressed": true,
+   "limitations_acknowledged": true
+  },
+  "citations": {
+   "text_has_bibliography": true,
+   "bibliography_all_cited": true,
+   "format_consistent": true,
+   "complete_information": true
+  },
+  "format": {
+   "title_page": true,
+   "section_numbering": true,
+   "heading_hierarchy": true,
+   "captions": true
+  }
+ },
+ "identified_issues": [],
+ "submission_ready": false,
+ "issues": [
+  "No abstract and no conclusion section - deliberate for an internal report, but both are required before this becomes an MNRAS submission.",
+  "S8 Calibration is a stub by instruction; the report therefore supports no detection threshold.",
+  "Figure 4 (Gamma null) is linked and referenced by S5.2 but not discussed in the text.",
+  "Identity of the 22-star and 27-star versions of the anomaly is probable but unverified.",
+  "Reticulum II run has equalisation off; no contaminant is expected but the run is inconsistent with Bootes II in that respect."
+ ]
+}

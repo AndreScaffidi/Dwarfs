@@ -1,0 +1,44 @@
+\BOOKMARK [1][-]{section.1}{Purpose and scope}{}% 1
+\BOOKMARK [1][-]{section.2}{EagleEye in brief}{}% 2
+\BOOKMARK [2][-]{subsection.2.1}{The coin-flip statistic}{section.2}% 3
+\BOOKMARK [2][-]{subsection.2.2}{IDE and rep\352chage}{section.2}% 4
+\BOOKMARK [2][-]{subsection.2.3}{The injection background estimator}{section.2}% 5
+\BOOKMARK [2][-]{subsection.2.4}{What is inherited and what is new}{section.2}% 6
+\BOOKMARK [1][-]{section.3}{Data, coverage and configuration}{}% 7
+\BOOKMARK [2][-]{subsection.3.1}{The Gaia query}{section.3}% 8
+\BOOKMARK [2][-]{subsection.3.2}{Coverage: the precondition for every number in this report}{section.3}% 9
+\BOOKMARK [2][-]{subsection.3.3}{Feature construction}{section.3}% 10
+\BOOKMARK [2][-]{subsection.3.4}{Configuration}{section.3}% 11
+\BOOKMARK [1][-]{section.4}{The multi-reference construction}{}% 12
+\BOOKMARK [2][-]{subsection.4.1}{The 33 tiling}{section.4}% 13
+\BOOKMARK [2][-]{subsection.4.2}{Robust scaling}{section.4}% 14
+\BOOKMARK [2][-]{subsection.4.3}{Per-reference nulls}{section.4}% 15
+\BOOKMARK [2][-]{subsection.4.4}{ as Fisher combination}{section.4}% 16
+\BOOKMARK [1][-]{section.5}{Reference handling}{}% 17
+\BOOKMARK [2][-]{subsection.5.1}{Why a contaminated reference corrupts every test star}{section.5}% 18
+\BOOKMARK [2][-]{subsection.5.2}{The saturation ceiling}{section.5}% 19
+\BOOKMARK [2][-]{subsection.5.3}{The equalisation algorithm}{section.5}% 20
+\BOOKMARK [2][-]{subsection.5.4}{KM and the locality bound}{section.5}% 21
+\BOOKMARK [1][-]{section.6}{Thresholding: the complete chain}{}% 22
+\BOOKMARK [2][-]{subsection.6.1}{*j \204 the per-reference flagging threshold}{section.6}% 23
+\BOOKMARK [2][-]{subsection.6.2}{ \204 the empirical threshold}{section.6}% 24
+\BOOKMARK [2][-]{subsection.6.3}{A and clustering}{section.6}% 25
+\BOOKMARK [2][-]{subsection.6.4}{ and S/ per cluster}{section.6}% 26
+\BOOKMARK [1][-]{section.7}{Recovery of known systems}{}% 27
+\BOOKMARK [2][-]{subsection.7.1}{Reticulum II}{section.7}% 28
+\BOOKMARK [2][-]{subsection.7.2}{Bo\366tes II}{section.7}% 29
+\BOOKMARK [1][-]{section.8}{An unidentified overdensity in the Reticulum II field}{}% 30
+\BOOKMARK [2][-]{subsection.8.1}{Properties}{section.8}% 31
+\BOOKMARK [2][-]{subsection.8.2}{Where the evidence is weak}{section.8}% 32
+\BOOKMARK [2][-]{subsection.8.3}{The robustness scan}{section.8}% 33
+\BOOKMARK [2][-]{subsection.8.4}{What has been ruled out, and what has not}{section.8}% 34
+\BOOKMARK [1][-]{section.9}{Calibration \204 PARTIAL, FOR LATER COMPLETION}{}% 35
+\BOOKMARK [2][-]{subsection.9.1}{Nulls implemented}{section.9}% 36
+\BOOKMARK [2][-]{subsection.9.2}{Stacking against pooling}{section.9}% 37
+\BOOKMARK [2][-]{subsection.9.3}{What is missing}{section.9}% 38
+\BOOKMARK [1][-]{section.10}{Open items}{}% 39
+\BOOKMARK [1][-]{appendix.A}{Hyperparameters}{}% 40
+\BOOKMARK [1][-]{appendix.B}{Parallelisation and determinism}{}% 41
+\BOOKMARK [1][-]{appendix.C}{Reserved}{}% 42
+\BOOKMARK [1][-]{appendix.D}{Figure manifest}{}% 43
+\BOOKMARK [1][-]{section*.20}{References}{}% 44
