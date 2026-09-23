@@ -842,7 +842,7 @@ def plot_grav_radii(runs, r, dist_kpc, *, ra_c=None, dec_c=None,
     """
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
-    from scipy.stats import gaussian_kde
+    from scipy.stats import gaussian_kde, poisson
     import analyze_known_dwarfs as akd
 
     if isinstance(runs, dict) and "gamma_clusters" in runs:
@@ -1220,3 +1220,1050 @@ def template_photometry(bat, name, r=None, *, pmemb_min=0.5, cache_dir=".",
               f"({info['n_local']} local, {info['n_fetched']} fetched, "
               f"{info['missing']} unavailable)")
     return g[ok], c[ok], info
+
+
+# ==========================================================================
+# Chance-cluster rate: how often does a smooth field make a clump like this?
+# ==========================================================================
+def chance_cluster_rate(Y, members=None, *, centre=None, m_list=(10, 20, 30),
+                        bw=0.8, exclude_members=True, verbose=True):
+    """Back-of-the-envelope probability that a clump this tight arose by chance.
+
+    The question: under an inhomogeneous Poisson null with the SAME smooth 4D
+    density as the data (so the field's real PM concentration is built in), how
+    many m-star clumps this compact do we expect anywhere in the tile?
+
+    Method, per m:
+      r_m     = radius of the m-th nearest member to the clump centre
+      lambda  = local smooth density at the centre, from a KDE whose bandwidth is
+                deliberately much larger than the clump (the clump is also dropped
+                from the fit) -- so lambda is the BACKGROUND, not the clump
+      mu      = lambda * V_4(r_m),  V_4(R) = pi^2 R^4 / 2
+      p_star  = P(Poisson(mu) >= m - 1)        per candidate centre
+      E_stars = nY * p_star                    expected stars with an m-NN ball this tight
+      E_clump = E_stars / m                    ... counted once per clump instead of m times
+
+    Also returns the purely EMPIRICAL rank: how many stars in the actual tile have
+    an m-NN ball at least as tight. The two disagreeing is informative -- it means
+    the Poisson/KDE model does not describe the field's small-scale structure.
+
+    Y        : (nY, d) array in the SAME scaled metric EagleEye used. "Compact" is
+               metric-dependent, so this must be run["Y"], not raw RA/Dec/PM.
+    members  : indices of the clump (centroid taken from them), or pass `centre`.
+    """
+    from scipy.stats import gaussian_kde, poisson
+    from scipy.special import gamma as gamma_fn
+    from sklearn.neighbors import KDTree
+
+    Y = np.asarray(Y, float)
+    nY, d = Y.shape
+    if centre is None:
+        if members is None:
+            raise ValueError("pass either members or centre")
+        centre = Y[np.asarray(members, int)].mean(axis=0)
+    centre = np.asarray(centre, float)
+
+    keep = np.ones(nY, bool)
+    if exclude_members and members is not None:
+        keep[np.asarray(members, int)] = False
+    kde = gaussian_kde(Y[keep].T, bw_method=bw)
+    lam = float(kde(centre[:, None])[0]) * int(keep.sum())
+
+    # unit-ball volume in d dims; d=4 -> pi^2/2
+    V_unit = np.pi ** (d / 2.0) / gamma_fn(d / 2.0 + 1.0)
+
+    dist_c = np.sort(np.linalg.norm(Y - centre, axis=1))
+    tree = KDTree(Y)
+
+    rows = []
+    for m in m_list:
+        if m > nY:
+            continue
+        r_m = float(dist_c[m - 1])
+        mu = lam * V_unit * r_m ** d
+        p_star = float(poisson.sf(m - 2, mu))          # P(>= m-1)
+        e_stars = nY * p_star
+        nn, _ = tree.query(Y, k=m)
+        n_tighter = int((nn[:, -1] <= r_m).sum())
+        rows.append({"m": int(m), "r_m": r_m, "mu": mu, "p_per_centre": p_star,
+                     "E_stars": e_stars, "E_clumps": e_stars / m,
+                     "n_tighter_observed": n_tighter,
+                     "frac_tighter_observed": n_tighter / nY})
+    df = pd.DataFrame(rows)
+
+    if verbose:
+        print(f"chance-cluster rate   nY={nY}  d={d}  lambda_local={lam:.3f} "
+              f"(KDE bw={bw}, clump {'excluded' if exclude_members else 'included'})")
+        print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+        print("\n  E_clumps is the expected NUMBER of chance clumps this tight in this")
+        print("  tile, already look-elsewhere corrected. >1 means unremarkable.")
+        print("  n_tighter_observed counts them in the REAL data (clump included), so")
+        print("  it is >= 1 by construction; a value of 1 means it is the tightest.")
+        print("  If E_clumps << 1 but n_tighter_observed is large, the Poisson model")
+        print("  is wrong for this field -- trust the empirical count, not mu.")
+    return {"lambda_local": lam, "centre": centre, "table": df}
+
+
+def chance_rate_vs_mock(run, gid=0, *, m_list=(10, 20, 30), n_mock=20, bw=0.8,
+                        pos_bw=0.35, pm_bw=1.0, seed=0, verbose=True):
+    """The same statistic, calibrated on smooth mocks instead of a Poisson formula.
+
+    For each mock (KDE resample of Y: same smooth structure, no small-scale
+    clustering) we record the TIGHTEST m-NN radius anywhere. The observed clump's
+    r_m is then placed in that distribution -- a genuine p-value that needs no
+    Poisson assumption and no aperture choice.
+    """
+    from scipy.stats import gaussian_kde, poisson
+    from sklearn.neighbors import KDTree
+
+    Y = np.asarray(run["Y"], float)
+    nY, d = Y.shape
+    mem = np.asarray(run["gamma_clusters"][gid], int)
+    centre = Y[mem].mean(axis=0)
+    dist_c = np.sort(np.linalg.norm(Y - centre, axis=1))
+    obs = {m: float(dist_c[m - 1]) for m in m_list if m <= nY}
+
+    rng = np.random.default_rng(seed)
+    kde = gaussian_kde(Y.T, bw_method=bw)
+    null = {m: [] for m in obs}
+    for b in range(int(n_mock)):
+        Yb = kde.resample(nY, seed=int(rng.integers(1 << 31))).T
+        tree = KDTree(Yb)
+        for m in obs:
+            nn, _ = tree.query(Yb, k=m)
+            null[m].append(float(nn[:, -1].min()))
+
+    rows = []
+    for m in obs:
+        v = np.asarray(null[m])
+        n_le = int((v <= obs[m]).sum())
+        rows.append({"m": m, "r_m_obs": obs[m], "mock_min_median": float(np.median(v)),
+                     "mock_min_best": float(v.min()),
+                     "n_mocks_tighter": n_le, "n_mock": int(n_mock),
+                     "p_value": (n_le + 1) / (int(n_mock) + 1)})
+    df = pd.DataFrame(rows)
+    if verbose:
+        print(f"tightest m-NN ball in {n_mock} smooth mocks vs the observed clump "
+              f"(gid={gid}, |clump|={mem.size})")
+        print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+        print("\n  p_value is (1 + #mocks at least as tight) / (1 + n_mock): the")
+        print("  smallest attainable value is 1/(n_mock+1), so raise n_mock if you")
+        print("  hit the floor. No Poisson assumption, no aperture choice.")
+    return {"observed": obs, "null": null, "table": df}
+
+
+def pm_sky_chance_clumps(run, gid=0, *, dist_kpc=30.0, fracs=(0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0),
+                         exclude_members=True, verbose=True):
+    """How many RA/Dec clumps arise by chance PURELY from clustering in PM?
+
+    Separable null: proper motions are drawn from the field's OWN pm distribution, and positions
+    are independent and uniform over the patch. Then for a cell of PM radius
+    dpm and sky radius theta,
+
+        mu       = n * f_mu(dpm) * (pi theta^2 / A)          expected background
+        f_mu     = fraction of FIELD stars inside the PM cell   <- measured
+        E_clumps = (n / m) * P(Poisson(mu) >= m)             look-elsewhere corrected
+
+    Unlike a ball in the joint MAD-scaled metric, this is a PRODUCT cell: "same
+    proper motion AND same patch of sky". That is the physically meaningful
+    question, and it is much more conservative -- a joint-metric ball selects the
+    most-clustered subset in a coupled metric and can look many orders of magnitude
+    more significant for the same stars. Cross-check the two; if they disagree
+    wildly, the clump is elongated in the joint metric and the product cell is the
+    number to trust.
+
+    The aperture is scanned over `fracs`, so the best E_clumps carries a trials
+    penalty of ~len(fracs) -- reported as E_clumps_scan.
+    """
+    from scipy.stats import poisson
+
+    Y = np.asarray(run["Y"], float)
+    n = len(Y)
+    phys = Y * run["scale"]["mad"] + run["scale"]["med"]   # dRAcosd, dDec, pmra, pmdec
+    mem = np.asarray(run["gamma_clusters"][gid], int)
+    keep = np.ones(n, bool)
+    if exclude_members:
+        keep[mem] = False
+
+    cm = phys[mem]
+    pm_c, sky_c = cm[:, 2:].mean(0), cm[:, :2].mean(0)
+    A = float(np.prod(phys[:, :2].max(0) - phys[:, :2].min(0)))
+    d_pm = np.linalg.norm(cm[:, 2:] - pm_c, axis=1)
+    d_sky = np.linalg.norm(cm[:, :2] - sky_c, axis=1)
+    pc_per_deg = np.deg2rad(1.0) * float(dist_kpc) * 1000.0
+
+    rows = []
+    for f in fracs:
+        r_pm, th = float(np.quantile(d_pm, f)), float(np.quantile(d_sky, f))
+        m = int(((d_pm <= r_pm) & (d_sky <= th)).sum())
+        if m < 4:
+            continue
+        f_mu = float((np.linalg.norm(phys[keep, 2:] - pm_c, axis=1) <= r_pm).mean())
+        mu = int(keep.sum()) * f_mu * (np.pi * th ** 2 / A)
+        P = float(poisson.sf(m - 1, mu))
+        rows.append({"frac": f, "m": m, "r_pm": r_pm, "theta_deg": th,
+                     "r_pc": th * pc_per_deg, "f_mu": f_mu, "mu": mu,
+                     "P_local": P, "E_clumps": (n / m) * P})
+    df = pd.DataFrame(rows)
+    df["E_clumps_scan"] = df["E_clumps"] * len(df)
+    best = df.loc[df["E_clumps"].idxmin()]
+
+    if verbose:
+        print(f"separable PM x sky chance rate   n={n}  A={A:.2f} deg^2  "
+              f"d={dist_kpc} kpc (1 deg = {pc_per_deg:.0f} pc)")
+        print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+        print(f"\n  best aperture: m={int(best['m'])}  theta={best['theta_deg']:.3f} deg "
+              f"({best['r_pc']:.0f} pc)  mu={best['mu']:.2f}")
+        print(f"  E_clumps = {best['E_clumps']:.3g}, or {best['E_clumps_scan']:.3g} "
+              f"after the {len(df)}-aperture scan penalty.")
+        print("  >~1 means a clump this good is EXPECTED in this patch by chance.")
+        print("\n  f_mu is the whole point: it is the fraction of the field sharing the")
+        print("  clump's proper motion, measured from the data. A peaked PM distribution")
+        print("  makes f_mu large, which makes sky clumping cheap -- exactly the effect")
+        print("  you were worried about, quantified without any Galactic model.")
+    return {"table": df, "best": best, "A_deg2": A, "n": n,
+            "pm_centre": pm_c, "sky_centre": sky_c}
+
+
+def chance_vs_patch_richness(run, gid=0, *, frac=0.6, n_grid=(200, 500, 1000, 2000,
+                             4000, 8000), dist_kpc=30.0, verbose=True):
+    """Does a SPARSER patch make chance clumps easier? Two answers, both true.
+
+    (a) At FIXED angular scale, E_clumps falls steeply with n -- a sparse patch has
+        fewer background stars to fake a clump with.
+    (b) But at FIXED member count m, the angular scale at which the clump stops
+        being remarkable (mu = m) GROWS as n falls, like 1/sqrt(n). Since EagleEye's
+        kNN balls are adaptive, a sparse patch pushes the method to physically huge
+        apertures -- and a "clump" 500 pc across is not a bound system at all.
+
+    (b) is the real content of the worry: sparse patches do not produce more chance
+    clumps, they produce chance clumps that are too big to be UFDs.
+    """
+    from scipy.stats import poisson
+
+    Y = np.asarray(run["Y"], float)
+    phys = Y * run["scale"]["mad"] + run["scale"]["med"]
+    mem = np.asarray(run["gamma_clusters"][gid], int)
+    keep = np.ones(len(Y), bool); keep[mem] = False
+    cm = phys[mem]
+    pm_c, sky_c = cm[:, 2:].mean(0), cm[:, :2].mean(0)
+    A = float(np.prod(phys[:, :2].max(0) - phys[:, :2].min(0)))
+    d_pm = np.linalg.norm(cm[:, 2:] - pm_c, axis=1)
+    d_sky = np.linalg.norm(cm[:, :2] - sky_c, axis=1)
+    r_pm, th = float(np.quantile(d_pm, frac)), float(np.quantile(d_sky, frac))
+    m = int(((d_pm <= r_pm) & (d_sky <= th)).sum())
+    f_mu = float((np.linalg.norm(phys[keep, 2:] - pm_c, axis=1) <= r_pm).mean())
+    pc_per_deg = np.deg2rad(1.0) * float(dist_kpc) * 1000.0
+
+    rows = []
+    for nn in n_grid:
+        mu = nn * f_mu * (np.pi * th ** 2 / A)
+        P = float(poisson.sf(m - 1, mu))
+        th_eq = float(np.sqrt(m * A / (nn * f_mu * np.pi)))   # theta where mu = m
+        rows.append({"n": nn, "mu": mu, "P_local": P, "E_clumps": (nn / m) * P,
+                     "theta_unremarkable_deg": th_eq,
+                     "r_unremarkable_pc": th_eq * pc_per_deg})
+    df = pd.DataFrame(rows)
+    if verbose:
+        print(f"fixed clump: m={m}, theta={th:.3f} deg, f_mu={f_mu:.3f}, A={A:.2f} deg^2")
+        print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+        print("\n  theta_unremarkable is where mu = m: a clump of this many stars inside")
+        print("  that radius is exactly what the background gives you. Compare against")
+        print("  UFD half-light radii (~20-300 pc) to see whether the method is even")
+        print("  operating in a regime where a bound system could be distinguished.")
+    return df
+
+
+def pm_sky_concentration_test(run, gid=0, *, q=0.6, n_null=500, seed=0, verbose=True):
+    """Does the PM-selected subsample CONCENTRATE on the sky, or merely populate it?
+
+    `pm_sky_chance_clumps` is a COUNTING statistic: it asks only whether >= m stars
+    fall inside the cell and is blind to their arrangement within it. This measures
+    concentration directly.
+
+    Take the k stars within Delta_mu of the clump's mean proper motion. Let c be the
+    largest number of them inside any sky disc of radius theta. Standardise by the
+    single-disc expectation nu_k = k pi theta^2 / A:
+
+        z = (c - nu_k) / sqrt(nu_k)
+
+    z MUST be calibrated empirically: c is a MAXIMUM over disc placements, so E[z] > 0
+    even for perfectly uniform points (~2.2 at these cardinalities). Three nulls are
+    returned, and they should agree:
+      "pm_cells"  other PM cells of the same radius drawn from the field
+      "uniform"   k points thrown uniformly on the patch
+      "pm_shuffled" real sky positions, proper motions permuted
+    """
+    from scipy.stats import poisson
+
+    from sklearn.neighbors import KDTree
+
+    Y = np.asarray(run["Y"], float); n = len(Y)
+    phys = Y * run["scale"]["mad"] + run["scale"]["med"]
+    sky, pm = phys[:, :2], phys[:, 2:]
+    lo, hi = sky.min(0), sky.max(0)
+    A = float(np.prod(hi - lo))
+    mem = np.asarray(run["gamma_clusters"][gid], int)
+    cm = phys[mem]
+    pm_c, sky_c = cm[:, 2:].mean(0), cm[:, :2].mean(0)
+    r_pm = float(np.quantile(np.linalg.norm(cm[:, 2:] - pm_c, axis=1), q))
+    th   = float(np.quantile(np.linalg.norm(cm[:, :2] - sky_c, axis=1), q))
+
+    def _z(P):
+        k = len(P)
+        if k < 2:
+            return k, np.nan
+        c = int(max(len(x) for x in KDTree(P).query_radius(P, th)))
+        nu_k = k * np.pi * th ** 2 / A
+        return c, (c - nu_k) / np.sqrt(nu_k)
+
+    sel = np.linalg.norm(pm - pm_c, axis=1) <= r_pm
+    k_obs = int(sel.sum())
+    c_obs, z_obs = _z(sky[sel])
+
+    rng = np.random.default_rng(seed)
+    null = {"pm_cells": [], "uniform": [], "pm_shuffled": []}
+    for i in rng.permutation(n):
+        if len(null["pm_cells"]) >= n_null:
+            break
+        if np.linalg.norm(pm[i] - pm_c) < 1.5 * r_pm:
+            continue
+        s = np.linalg.norm(pm - pm[i], axis=1) <= r_pm
+        if s.sum() < 25:
+            continue
+        null["pm_cells"].append(_z(sky[s])[1])
+    for _ in range(int(n_null)):
+        null["uniform"].append(_z(rng.uniform(lo, hi, size=(k_obs, 2)))[1])
+        pmS = pm[rng.permutation(n)]
+        s = np.linalg.norm(pmS - pm[rng.integers(n)], axis=1) <= r_pm
+        if s.sum() >= 25:
+            null["pm_shuffled"].append(_z(sky[s])[1])
+
+    rows = []
+    for name, v in null.items():
+        v = np.asarray([x for x in v if np.isfinite(x)])
+        rows.append({"null": name, "trials": v.size, "median_z": float(np.median(v)),
+                     "q90": float(np.quantile(v, .9)), "max_z": float(v.max()),
+                     "p_value": float((np.sum(v >= z_obs) + 1) / (v.size + 1))})
+    df = pd.DataFrame(rows)
+
+    if verbose:
+        nu_k = k_obs * np.pi * th ** 2 / A
+        print(f"sky concentration of the PM-selected subsample   "
+              f"(Delta_mu={r_pm:.3f} mas/yr, theta={th:.3f} deg)")
+        print(f"  observed: k={k_obs}, max-disc count c={c_obs}, nu_k={nu_k:.2f}, "
+              f"z={z_obs:.2f}")
+        print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+        print(f"\n  Poisson would give median z = 0 and p = {poisson.sf(c_obs-1, nu_k):.2e};")
+        print("  the measured median z ~ 2.2 is the look-elsewhere offset of maximising")
+        print("  over disc placements, NOT intrinsic clustering -- which is why the")
+        print("  uniform control must be run before any of this is interpreted.")
+    return {"z_obs": z_obs, "c_obs": c_obs, "k": k_obs, "r_pm": r_pm, "theta": th,
+            "null": null, "table": df}
+
+
+# ==========================================================================
+# Metallicity: fetch, coverage audit, and a coherence test
+# ==========================================================================
+_FEH_SOURCES = {
+    # name        : (what it is,                              practical limit)
+    "gspphot":     ("Gaia DR3 GSP-Phot mh_gspphot",           "G < 19, prior-driven"),
+    "gspspec":     ("Gaia DR3 GSP-Spec mh_gspspec",           "G_RVS < 12"),
+    "chiti2021":   ("SMSS DR2 photometric [Fe/H] (VizieR J/ApJS/254/31)", "g < 16"),
+    "smss_dr4":    ("SMSS DR4 u,v,g,i photometry (VizieR II/379/smssdr4)", "v < ~18.5"),
+}
+
+
+def fetch_metallicity(source_ids, ra=None, dec=None, *, source="gspphot",
+                      cache_dir=".", chunk=2000, verbose=True):
+    """[Fe/H] (or the photometry to derive it) for a list of Gaia source_ids.
+
+    source="gspphot"   Gaia DR3 astrophysical_parameters. The only option with any
+                       reach past G~18, but GSP-Phot is prior-driven and its quoted
+                       errors are badly optimistic for metal-poor stars.
+    source="gspspec"   RVS spectroscopy. G_RVS < 12; useless for halo dwarfs.
+    source="chiti2021" SMSS DR2 photometric metallicities, joined on Gaia id.
+                       Built for BRIGHT extremely-metal-poor candidates: g < 16.
+    source="smss_dr4"  raw SMSS DR4 u/v/g/i, matched on sky within 1 arcsec. The v
+                       band carries the Ca II H&K signal; check it is not all NaN
+                       before doing anything else (see metallicity_coverage).
+
+    Returns a DataFrame indexed by source_id. Cached on the id-list hash.
+    """
+    import hashlib, pickle as _pkl
+    from pathlib import Path
+    sids = np.asarray(source_ids, dtype="int64")
+    key = hashlib.md5((source + ",".join(map(str, np.sort(sids)))).encode()).hexdigest()[:12]
+    cf = Path(cache_dir) / f"feh_{source}_{sids.size}_{key}.pkl"
+    if cf.exists():
+        if verbose:
+            print(f"  [Fe/H] <- cache {cf.name}")
+        return _pkl.load(open(cf, "rb"))
+
+    if source in ("gspphot", "gspspec"):
+        from astroquery.gaia import Gaia
+        col = "mh_gspphot" if source == "gspphot" else "mh_gspspec"
+        extra = (", mh_gspphot_lower, mh_gspphot_upper, teff_gspphot, logg_gspphot"
+                 if source == "gspphot" else "")
+        out = []
+        for i in range(0, sids.size, chunk):
+            ids = ",".join(map(str, sids[i:i + chunk]))
+            q = (f"SELECT source_id, {col}{extra} FROM gaiadr3.astrophysical_parameters "
+                 f"WHERE source_id IN ({ids})")
+            out.append(Gaia.launch_job_async(q).get_results().to_pandas())
+        df = pd.concat(out, ignore_index=True)
+        df = df.rename(columns={col: "feh"})
+        if source == "gspphot" and "mh_gspphot_lower" in df:
+            df["e_feh"] = (df["mh_gspphot_upper"] - df["mh_gspphot_lower"]) / 2.0
+    else:
+        from astroquery.vizier import Vizier
+        import astropy.units as u
+        from astropy.coordinates import SkyCoord
+        if ra is None or dec is None:
+            raise ValueError(f"source={source!r} is matched on sky: pass ra, dec")
+        if source == "chiti2021":
+            vz = Vizier(columns=["**"], row_limit=-1)
+            t = vz.query_region(SkyCoord(np.mean(ra), np.mean(dec), unit="deg"),
+                                radius=2.0 * u.deg, catalog="J/ApJS/254/31")
+            df = t[0].to_pandas() if len(t) else pd.DataFrame()
+            if len(df):
+                df["source_id"] = pd.to_numeric(df["Gaia"], errors="coerce")
+                df = df.rename(columns={"[Fe/H]": "feh", "e_[Fe/H]": "e_feh"})
+                df = df[df["source_id"].isin(sids)]
+        else:
+            vz = Vizier(columns=["RAICRS", "DEICRS", "uPSF", "vPSF", "e_vPSF",
+                                 "gPSF", "iPSF"], row_limit=-1)
+            t = vz.query_region(SkyCoord(np.asarray(ra), np.asarray(dec), unit="deg"),
+                                radius=1.0 * u.arcsec, catalog="II/379/smssdr4")
+            df = t[0].to_pandas() if len(t) else pd.DataFrame()
+    if "source_id" in df:
+        df = df.set_index("source_id")
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    _pkl.dump(df, open(cf, "wb"))
+    if verbose:
+        n = int(np.isfinite(pd.to_numeric(df.get("feh", pd.Series(dtype=float)),
+                                          errors="coerce")).sum()) if "feh" in df else 0
+        print(f"  [Fe/H] {source}: {len(df)} rows, {n} finite -> {cf.name}")
+    return df
+
+
+def metallicity_coverage(run, r, gid=0, *, cache_dir=".", verbose=True):
+    """Audit which metallicity sources actually reach this candidate's stars.
+
+    Run this BEFORE designing any metallicity test. For a typical UFD candidate at
+    G ~ 20 the answer is usually "none of them", and it is much cheaper to learn
+    that here than after building the analysis.
+    """
+    ti = np.asarray(run["parts"]["test_idx"], int)
+    mem = np.asarray(run["gamma_clusters"][gid], int)
+    sid = np.asarray(r["source_id"], dtype="int64")[ti][mem]
+    G = np.asarray(r["phot_g_mean_mag"], float)[ti][mem]
+    ra = np.asarray(r["ra"], float)[ti][mem]
+    dec = np.asarray(r["dec"], float)[ti][mem]
+    rows = []
+    for src in ("gspphot", "chiti2021", "smss_dr4"):
+        try:
+            df = fetch_metallicity(sid, ra, dec, source=src, cache_dir=cache_dir,
+                                   verbose=False)
+            if "feh" in df:
+                n = int(np.isfinite(pd.to_numeric(df["feh"], errors="coerce")).sum())
+            elif "vPSF" in df:
+                n = int(np.isfinite(pd.to_numeric(df["vPSF"], errors="coerce")).sum())
+            else:
+                n = 0
+        except Exception as e:
+            n = -1
+            if verbose:
+                print(f"  {src}: FAILED {type(e).__name__}: {str(e)[:60]}")
+        rows.append({"source": src, "what": _FEH_SOURCES[src][0],
+                     "limit": _FEH_SOURCES[src][1], "n_usable": n, "n_members": mem.size})
+    df = pd.DataFrame(rows)
+    if verbose:
+        print(f"metallicity coverage for {mem.size} members "
+              f"(G: {G.min():.1f}-{G.max():.1f}, median {np.median(G):.1f})")
+        print(df.to_string(index=False))
+    return df
+
+
+def metallicity_coherence(feh_mem, feh_field, *, e_mem=None, n_null=5000, seed=0,
+                          verbose=True):
+    """Do the members share a metallicity, and is it metal-poor for the field?
+
+    Two one-sided tests against random field subsamples of the same size:
+      dispersion  a bound system has a small intrinsic [Fe/H] spread
+      location    a UFD sits metal-poor relative to the halo field
+
+    Distance-independent, unlike an isochrone fit -- which is the reason to prefer
+    it once the data exist.
+    """
+    fm = np.asarray(feh_mem, float); fm = fm[np.isfinite(fm)]
+    ff = np.asarray(feh_field, float); ff = ff[np.isfinite(ff)]
+    m = fm.size
+    if m < 3 or ff.size < 10 * m:
+        raise ValueError(f"not enough data: {m} members, {ff.size} field")
+    sd_obs, mu_obs = float(np.std(fm, ddof=1)), float(np.mean(fm))
+    sig_int = np.nan
+    if e_mem is not None:
+        e = np.asarray(e_mem, float)[np.isfinite(np.asarray(feh_mem, float))]
+        sig_int = float(np.sqrt(max(sd_obs ** 2 - np.nanmean(e ** 2), 0.0)))
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, ff.size, size=(int(n_null), m))
+    sd_n = ff[idx].std(axis=1, ddof=1); mu_n = ff[idx].mean(axis=1)
+    p_disp = float((np.sum(sd_n <= sd_obs) + 1) / (n_null + 1))
+    p_loc  = float((np.sum(mu_n <= mu_obs) + 1) / (n_null + 1))
+    if verbose:
+        print(f"metallicity coherence: {m} members vs {ff.size} field stars")
+        print(f"  members: mean [Fe/H] = {mu_obs:+.2f}, dispersion = {sd_obs:.2f} dex"
+              + (f", intrinsic = {sig_int:.2f} dex" if np.isfinite(sig_int) else ""))
+        print(f"  field  : mean [Fe/H] = {np.mean(ff):+.2f}, dispersion = {np.std(ff):.2f} dex")
+        print(f"  p(dispersion this tight) = {p_disp:.4f}")
+        print(f"  p(mean this metal-poor)  = {p_loc:.4f}")
+    return {"n": m, "mean": mu_obs, "sd": sd_obs, "sigma_int": sig_int,
+            "p_dispersion": p_disp, "p_location": p_loc,
+            "null_sd": sd_n, "null_mean": mu_n}
+
+
+# ==========================================================================
+# Local significance: on/off counting instead of overlap-weighted repechage
+# ==========================================================================
+def li_ma(n_on, n_off, alpha):
+    """Li & Ma (1983) Eq. 17 significance for on/off counting with exposure ratio
+    alpha = t_on/t_off.  Correct for small counts, where S/sqrt(B) is not, and
+    finite where B -> 0.  Signed by the sign of the excess."""
+    n_on, n_off, alpha = float(n_on), float(n_off), float(alpha)
+    if n_on <= 0 and n_off <= 0:
+        return 0.0
+    tot = n_on + n_off
+    t1 = n_on * np.log(((1 + alpha) / alpha) * (n_on / tot)) if n_on > 0 else 0.0
+    t2 = n_off * np.log((1 + alpha) * (n_off / tot)) if n_off > 0 else 0.0
+    s = np.sqrt(max(2.0 * (t1 + t2), 0.0))
+    return float(np.sign(n_on - alpha * n_off) * s)
+
+
+def local_significance_onoff(run, r, gid=0, *, fracs=(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+                             use_all_Y=True, verbose=True):
+    """Local S and significance from direct on/off counting in the stacked geometry.
+
+    The estimator currently in the pipeline routes a counting problem through
+    EagleEye's repechage bookkeeping: it averages the per-cluster Eq.9 backgrounds
+    B_hat_{j,c} with weights o_{j,c} (the overlap with A_Gamma). Three things go
+    wrong with that:
+
+      1. o_{j,c} is EXTENSIVE (a count) but is used to weight an average of
+         extensive quantities -- B_hat_{j,c} refers to all of cluster (j,c), not to
+         the part inside A_alpha, so large EE clusters contribute a background that
+         mostly describes sky outside the Gamma cluster.
+      2. the z > 0 filter discards contributions whose B_hat is large, which is a
+         selection on the very quantity being estimated.
+      3. S = |A_alpha| is the FLAGGED count, so S/sqrt(B) has a null floor of
+         sqrt(B) rather than zero.
+
+    None of that bookkeeping is needed. The 8 references ARE the off-region. Define
+    a ball around the Gamma-cluster centroid in the shared scaled metric, count
+
+        N_on  = Y points inside it,
+        N_off = sum_j X^(j) points inside the same ball (same relative coordinates),
+        alpha = n_Y / sum_j n_X^(j),
+        B_hat = alpha * N_off,   S = N_on - B_hat,
+
+    and report Li & Ma. Because the references are built on the same local frame,
+    the ball transfers to each tile without any remapping.
+
+    use_all_Y=True counts EVERY Y point in the ball, not only the flagged ones,
+    which removes the post-selection bias in S. The region is still defined from
+    the flagged points, so mild circularity remains -- scan `fracs` and read the
+    trend, not a single row.
+    """
+    import robustness as rb
+    Y = np.asarray(run["Y"], float)
+    X_refs, _ = rb.refs_after_equalisation(run, r)
+    nY, nXs = len(Y), [len(x) for x in X_refs]
+    alpha = nY / float(sum(nXs))
+    mem = np.asarray(run["gamma_clusters"][gid], int)
+    c = Y[mem].mean(axis=0)
+    d_mem = np.linalg.norm(Y[mem] - c, axis=1)
+    dY = np.linalg.norm(Y - c, axis=1)
+    dX = [np.linalg.norm(Xj - c, axis=1) for Xj in X_refs]
+
+    rows = []
+    for f in fracs:
+        R = float(np.quantile(d_mem, f))
+        n_on = int((dY <= R).sum()) if use_all_Y else int((d_mem <= R).sum())
+        per = [int((dj <= R).sum()) for dj in dX]
+        n_off = int(sum(per))
+        B = alpha * n_off
+        rows.append({"frac": f, "R": R, "N_on": n_on, "N_off": n_off,
+                     "B_hat": B, "S": n_on - B,
+                     "S_over_rootB": (n_on - B) / np.sqrt(B) if B > 0 else np.nan,
+                     "Z_LiMa": li_ma(n_on, n_off, alpha),
+                     "n_refs_nonzero": int(np.sum(np.asarray(per) > 0))})
+    df = pd.DataFrame(rows)
+    if verbose:
+        print(f"on/off local significance   nY={nY}  sum nX={sum(nXs)}  alpha={alpha:.4f}")
+        print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+        print("\n  S_over_rootB here is the EXCESS over sqrt(B) -- it is zero under the")
+        print("  null, unlike |A_Gamma|/sqrt(B). Z_LiMa is the likelihood-ratio version")
+        print("  and is the number to quote: it is calibrated at small counts and stays")
+        print("  finite as B -> 0.")
+    return {"table": df, "alpha": alpha, "nY": nY, "nXs": nXs, "centroid": c}
+
+
+def compare_local_estimators(run, r, gid=0, *, frac=0.8, verbose=True):
+    """Side-by-side: the pipeline's overlap-weighted estimator, a footprint-corrected
+    version of it, and on/off counting. Needs keep_heavy for the first two."""
+    out = {}
+    cs = run.get("cluster_stats", {}).get(int(gid))
+    if cs is not None:
+        out["pipeline"] = {"S": cs["S"], "B": cs["B_weighted"],
+                           "stat": cs["s_over_rootB"], "form": "|A_Gamma|/sqrt(B_w)"}
+        contrib = cs.get("contributors") or []
+        if contrib and run.get("EE_books") is not None:
+            num = den = 0.0
+            for e in contrib:
+                book = run["EE_books"][e["ref"]]["Y_OVER_clusters"][e["cid"]]
+                M = len(np.asarray(book.get("Repechaged", []), int))
+                if M:
+                    num += e["Bhat"] * e["overlap"] / M; den += 1.0
+            if den:
+                Bf = num / den
+                out["footprint"] = {"S": cs["S"], "B": Bf,
+                                    "stat": (cs["S"] - Bf) / np.sqrt(Bf) if Bf > 0 else np.nan,
+                                    "form": "(S - B_apportioned)/sqrt(B)"}
+    oo = local_significance_onoff(run, r, gid, fracs=(frac,), verbose=False)
+    row = oo["table"].iloc[0]
+    out["onoff"] = {"S": row["S"], "B": row["B_hat"], "stat": row["Z_LiMa"],
+                    "form": "Li & Ma on/off"}
+    if verbose:
+        print(f"{'estimator':<12} {'S':>8} {'B':>9} {'statistic':>10}   form")
+        for k, v in out.items():
+            print(f"{k:<12} {v['S']:>8.1f} {v['B']:>9.2f} {v['stat']:>10.2f}   {v['form']}")
+    return out
+
+
+def local_significance_native(run, gid=0, *, min_overlap=1, combine="scatter",
+                              verbose=True):
+    """Local significance from EagleEye's OWN per-reference estimator. No apertures.
+
+    EagleEye already computes the right thing. S_rootB_estimate_Y_overdensities
+    returns, per overdensity cluster c of reference j,
+
+        z_{j,c} = ( |Repechaged_{j,c}| - B_hat_{j,c} ) / sqrt( B_hat_{j,c} )
+
+    which IS background-subtracted. The pipeline's
+    srootB_for_Gamma_clusters_from_Brefs receives these values in SrootB_by_ref and
+    uses them only as a `z > 0` boolean gate, then rebuilds |A_Gamma|/sqrt(B_w)
+    -- discarding the subtraction and introducing the sqrt(B) null floor.
+
+    Here the overlap o_{j,c} is used ONLY to identify which EE cluster corresponds
+    to the Gamma cluster (largest overlap wins), never to weight a background. That
+    removes the footprint mismatch: each reference contributes its own internally
+    consistent (S, B) pair.
+
+    combine="scatter"  Z = mean(z) / (sd(z)/sqrt(n)). Lets the observed
+                       reference-to-reference dispersion set the error. Use this:
+                       if the z_j disagree by much more than unit variance the
+                       model is wrong and the assumed-variance version is a fiction.
+    combine="reff"     Z = mean(z) * sqrt(R_eff), with R_eff from the Upsilon
+                       correlation matrix. Assumes each z_j has unit variance under
+                       the null, which the scatter usually contradicts.
+
+    n_refs is as important as Z: it is how many of the R references independently
+    produced a cluster here at all.
+    """
+    cs = run.get("cluster_stats", {}).get(int(gid))
+    if cs is None:
+        raise KeyError(f"no cluster_stats for gid={gid}")
+    best = {}
+    for e in cs.get("contributors") or []:
+        if e["overlap"] < int(min_overlap):
+            continue
+        if e["ref"] not in best or e["overlap"] > best[e["ref"]]["overlap"]:
+            best[e["ref"]] = e
+    R = int(np.asarray(run["Upsilon_by_ref"]).shape[0])
+    if not best:
+        return {"Z": np.nan, "n_refs": 0, "R": R, "z": np.array([])}
+    refs = sorted(best)
+    z = np.array([best[j]["z"] for j in refs], float)
+    n = z.size
+    Cm = np.corrcoef(np.asarray(run["Upsilon_by_ref"], float))
+    rho = float((Cm.sum() - R) / (R * (R - 1)))
+    R_eff = R / (1.0 + (R - 1) * rho)
+    sd = float(np.std(z, ddof=1)) if n > 1 else np.nan
+    Z_scatter = float(z.mean() / (sd / np.sqrt(n))) if (n > 1 and sd > 0) else np.nan
+    Z_reff = float(z.mean() * np.sqrt(min(R_eff, n)))
+    out = {"Z": Z_scatter if combine == "scatter" else Z_reff,
+           "Z_scatter": Z_scatter, "Z_reff": Z_reff, "z": z, "refs": refs,
+           "n_refs": n, "R": R, "rho": rho, "R_eff": R_eff,
+           "mean_z": float(z.mean()), "sd_z": sd,
+           "overlaps": [best[j]["overlap"] for j in refs],
+           "Bhat": [best[j]["Bhat"] for j in refs]}
+    if verbose:
+        print(f"native EE local significance, cluster {gid} (|A_alpha|={cs['S']})")
+        print(f"  contributing references: {n} of {R}   refs {refs}")
+        print(f"  per-reference z: {np.round(z,2)}")
+        print(f"  overlaps       : {out['overlaps']}")
+        print(f"  mean z = {z.mean():.2f}, sd = {sd:.2f}"
+              f"   (sd ~ 1 expected if the z_j are consistent)")
+        print(f"  rho = {rho:.3f} -> R_eff = {R_eff:.2f}")
+        print(f"  Z (scatter-based) = {Z_scatter:.2f}      <- recommended")
+        print(f"  Z (R_eff-based)   = {Z_reff:.2f}")
+        if n > 1 and sd > 2.0:
+            print(f"  WARNING: sd(z)={sd:.1f} >> 1. The references disagree far more than")
+            print( "  sampling allows -- one reference is probably carrying the result.")
+        if n < R:
+            print(f"  NOTE: {R-n} reference(s) produced no matching cluster (no overlap,")
+            print( "  or dropped by EE's lenSo<5 rule or the z>0 gate). That absence is")
+            print( "  persistence information and should be reported alongside Z.")
+    return out
+
+
+# ==========================================================================
+# Per-reference contribution accounting (Li & Ma on the native repechage sets)
+# ==========================================================================
+def reference_contributions(run, gid=0, *, min_overlap=1, min_overlap_frac=0.0):
+    """One row per reference that produced an EE cluster overlapping Gamma-cluster gid.
+
+    Eq.9 IS an on/off measurement: ON = |Repechaged|, OFF = |Background| (the
+    injected control sample), alpha = (nY-|W_o|)/(nX-|W_u|). So Li & Ma applies
+    directly to EagleEye's own sets -- no aperture, no ball.
+
+    EE's own z = (N_on - alpha N_off)/sqrt(alpha N_off) treats B_hat as exact. It is
+    not: N_off is a Poisson count too, so Var = B(1+alpha). At the alpha ~ 1 that
+    equalisation enforces, EE's z is overstated by ~1/sqrt(2).
+
+    Exact N_on/N_off come from EE_books when present (keep_heavy); otherwise they are
+    recovered from the stored (Bhat, z) with alpha ~ nY/nX_j, which is accurate to a
+    fraction of a count. `exact` records which was used.
+    """
+    cs = (run.get("cluster_stats") or {}).get(int(gid))
+    if cs is None:
+        return pd.DataFrame()
+    nY, nXs = run["nY"], run["nXs"]
+    books = run.get("EE_books")
+    best = {}
+    for e in (cs.get("contributors") or []):
+        if e["overlap"] < int(min_overlap):
+            continue
+        if e["ref"] not in best or e["overlap"] > best[e["ref"]]["overlap"]:
+            best[e["ref"]] = e
+    S_alpha = int(cs["S"])
+    rows = []
+    for j in sorted(best):
+        e = best[j]; B = float(e["Bhat"]); z = float(e["z"])
+        exact = False
+        if books is not None:
+            try:
+                oc = books[j]["Y_OVER_clusters"][e["cid"]]
+                n_on = len(np.asarray(oc["Repechaged"], int))
+                n_off = len(np.asarray(oc["Background"], int))
+                alpha = B / n_off if n_off else np.nan
+                exact = True
+            except Exception:
+                exact = False
+        if not exact:
+            alpha = nY / float(nXs[j])
+            n_on = int(round(z * np.sqrt(B) + B)); n_off = int(round(B / alpha))
+        # Overlap FRACTION, not just the count. A reference whose EE cluster has
+        # 101 members and shares 3 of them with a 22-point Gamma cluster is
+        # describing a different object (Reticulum II, typically) and should not
+        # lend it its significance. ov_frac normalises by the smaller of the two.
+        ov_frac = e["overlap"] / max(1, min(S_alpha, int(n_on)))
+        if ov_frac < float(min_overlap_frac):
+            continue
+        rows.append({"ref": j, "cid": int(e["cid"]), "overlap": int(e["overlap"]),
+                     "ov_frac": float(ov_frac),
+                     "N_on": int(n_on), "N_off": int(n_off), "alpha": float(alpha),
+                     "B_hat": B, "z_EE": z, "Z_LiMa": li_ma(n_on, n_off, alpha),
+                     "exact": exact})
+    return pd.DataFrame(rows)
+
+
+def combined_significance(run, gid=0, *, min_overlap=1, min_overlap_frac=0.0):
+    """Combine the per-reference Li & Ma values three ways. Reports n_refs, which
+    matters as much as Z: a Z built from 3 references is not a Z built from 8."""
+    df = reference_contributions(run, gid, min_overlap=min_overlap,
+                                 min_overlap_frac=min_overlap_frac)
+    R = int(np.asarray(run["Upsilon_by_ref"]).shape[0])
+    out = {"gid": int(gid), "R": R, "n_refs": len(df), "refs": list(df["ref"]) if len(df) else [],
+           "S": (run["cluster_stats"][int(gid)]["S"] if gid in run.get("cluster_stats", {}) else np.nan),
+           "srb_pipeline": (run["cluster_stats"][int(gid)]["s_over_rootB"]
+                            if gid in run.get("cluster_stats", {}) else np.nan)}
+    if not len(df):
+        out.update(Z_scatter=np.nan, Z_reff=np.nan, Z_pooled=np.nan,
+                   mean_Z=np.nan, sd_Z=np.nan, R_eff=np.nan, rho=np.nan)
+        return out
+    Z = df["Z_LiMa"].to_numpy(float); n = Z.size
+    U = np.asarray(run["Upsilon_by_ref"], float); Cm = np.corrcoef(U)
+    rho = float((Cm.sum() - R) / (R * (R - 1)))
+    R_eff = R / (1.0 + (R - 1) * rho)
+    sd = float(np.std(Z, ddof=1)) if n > 1 else np.nan
+    non = float(df["N_on"].mean())                       # same Y points in each ref
+    noff = float(df["N_off"].sum())
+    a_pool = 1.0 / float(np.sum(1.0 / df["alpha"].to_numpy(float)))
+    out.update(mean_Z=float(Z.mean()), sd_Z=sd, rho=rho, R_eff=R_eff,
+               # n=2 gives a scatter estimate on one degree of freedom: it swings
+               # over orders of magnitude and is not usable. Require 3.
+               Z_scatter=(float(Z.mean() / (sd / np.sqrt(n))) if n >= 3 and sd > 0 else np.nan),
+               Z_reff=float(Z.mean() * np.sqrt(min(R_eff, n))),
+               Z_pooled=li_ma(round(non), round(noff), a_pool),
+               n_indep=float(n / (1 + (n - 1) * rho)))
+    return out
+
+
+def contribution_line(run, gid=0):
+    """One compact line for run_summary."""
+    c = combined_significance(run, gid)
+    if not c["n_refs"]:
+        return f"cl{gid}: no reference clusters"
+    return (f"cl{gid}: refs {c['n_refs']}/{c['R']} {c['refs']} | "
+            f"Z_LiMa pooled={c['Z_pooled']:.2f} scatter={c['Z_scatter']:.2f} "
+            f"| EE srb={c['srb_pipeline']:.2f}")
+
+
+def contribution_report(run, gid=None, *, verbose=True):
+    """Full per-reference table plus the combined numbers, for every Gamma cluster."""
+    gids = sorted(run.get("gamma_clusters", {})) if gid is None else [int(gid)]
+    tabs, summ = {}, []
+    for g in gids:
+        df = reference_contributions(run, g)
+        c = combined_significance(run, g)
+        tabs[g] = df; summ.append(c)
+        if verbose:
+            print(f"\n--- Gamma cluster {g}:  |A|={c['S']}  "
+                  f"pipeline S/sqrt(B)={c['srb_pipeline']:.2f} ---")
+            if not len(df):
+                print("  no reference produced an overlapping EE cluster"); continue
+            print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+            print(f"  contributing references : {c['n_refs']} of {c['R']}  {c['refs']}")
+            print(f"  mean Z_LiMa {c['mean_Z']:.2f}  sd {c['sd_Z']:.2f}"
+                  f"   (sd ~ 1 if the references agree)")
+            print(f"  rho={c['rho']:.3f}  R_eff={c['R_eff']:.2f}  "
+                  f"effective independent refs here = {c['n_indep']:.1f}")
+            print(f"  Z_pooled  = {c['Z_pooled']:.2f}   (pool the OFF counts; "
+                  f"optimistic, refs are correlated)")
+            print(f"  Z_scatter = {c['Z_scatter']:.2f}   (let the reference spread set "
+                  f"the error; recommended)")
+    return {"tables": tabs, "summary": pd.DataFrame(summ)}
+
+
+def scan_contributions(scan_runs, cfgs=None, *, verbose=True):
+    """The big table: every configuration x Gamma cluster x reference.
+
+    Use it to see whether the SAME references support the feature as the tile moves,
+    or whether a different subset carries it each time -- a persistent centroid
+    driven by a rotating cast of references is a very different claim from one
+    supported by the same references throughout.
+    """
+    # rb.scan returns a DICT {label: run}; accept a list too.
+    if isinstance(scan_runs, dict):
+        labs = ([c["label"] for c in cfgs if c["label"] in scan_runs]
+                if cfgs is not None else list(scan_runs))
+        pairs = [(l, scan_runs[l]) for l in labs]
+    else:
+        labs = ([c["label"] for c in cfgs] if cfgs is not None
+                else [f"cfg{i}" for i in range(len(scan_runs))])
+        pairs = list(zip(labs, scan_runs))
+    rows, summ = [], []
+    for lab, run in pairs:
+        if run is None:
+            continue
+        for g in sorted(run.get("gamma_clusters", {})):
+            df = reference_contributions(run, g)
+            c = combined_significance(run, g)
+            c["config"] = lab; summ.append(c)
+            for _, rw in df.iterrows():
+                d = rw.to_dict(); d["config"] = lab; d["gid"] = g; rows.append(d)
+    per_ref = pd.DataFrame(rows)
+    per_cl = pd.DataFrame(summ)
+    if len(per_cl):
+        cols = ["config", "gid", "S", "n_refs", "R", "refs", "Z_pooled",
+                "Z_scatter", "srb_pipeline"]
+        per_cl = per_cl[[c for c in cols if c in per_cl.columns]]
+    if verbose and len(per_cl):
+        print("per-configuration summary")
+        print(per_cl.to_string(index=False, float_format=lambda v: f"{v:.3g}"))
+        if len(per_ref):
+            tally = per_ref.groupby("ref").size()
+            print(f"\nhow often each reference contributes, across all configs/clusters:")
+            print("  " + "  ".join(f"ref{k}:{v}" for k, v in tally.items()))
+    return {"per_reference": per_ref, "per_cluster": per_cl}
+
+
+# ==========================================================================
+# Show WHICH reference tiles support a cluster, on the Part-3 plots
+# ==========================================================================
+def match_cluster_to_target(run, r, target=None, *, gid=None):
+    """Which Gamma cluster of `run` is the anomaly? By source_id overlap with the
+    target's member set if available, else by sky centroid. Returns a gid."""
+    cl = run.get("gamma_clusters") or {}
+    if gid is not None:
+        return int(gid)
+    if not cl:
+        return None
+    if len(cl) == 1:
+        return int(next(iter(cl)))
+    if target is None:
+        # largest cluster, as a last resort
+        return int(max(cl, key=lambda g: np.size(cl[g])))
+    import robustness as rb
+    _, ra, dec, _, _, sid = rb._yspace(run, r)
+    A0 = target.get("source_ids")
+    if A0:
+        A0 = set(int(s) for s in A0)
+        best, nbest = None, -1
+        for g, ix in cl.items():
+            ix = np.asarray(ix, int)
+            n = len(A0 & set(int(s) for s in sid[ix]))
+            if n > nbest:
+                best, nbest = int(g), n
+        if nbest > 0:
+            return best
+    # fall back to the nearest centroid on the sky
+    tr, td = float(target["ra_c"]), float(target["dec_c"])
+    def _d(g):
+        ix = np.asarray(cl[g], int)
+        return np.hypot((np.mean(ra[ix]) - tr) * np.cos(np.deg2rad(td)),
+                        np.mean(dec[ix]) - td)
+    return int(min(cl, key=_d))
+
+
+def annotate_contributing_refs(ax, run, r=None, target=None, *, gid=None,
+                               space="sky", show_labels=True, alpha_fill=0.10,
+                               colour="tab:red", fontsize=8, min_overlap_frac=0.0,
+                               verbose=True):
+    """Outline the reference TILES that produced an EE cluster overlapping the
+    anomaly, annotated with both local estimates.
+
+    Drop one line after any plot_field call:
+        ax = plot_field(run_s, SCAN_R, neigh_s, field_cat_s, space="sky")
+        wt.annotate_contributing_refs(ax, run_s, SCAN_R, TARGET)
+
+    On the sky panel the contributing tiles are shaded and labelled
+
+        R<j>  z=<EE>  Z=<LiMa>
+
+    where z is EagleEye's own (N_on - B_hat)/sqrt(B_hat) and Z is Li & Ma on the
+    same repechage sets. Non-contributing tiles are left plain: their silence is the
+    point. In PM space the tiles have no meaning (all references overlap there), so
+    only the text box is drawn.
+    """
+    import matplotlib.pyplot as plt
+    import analyze_known_dwarfs as akd
+    g = match_cluster_to_target(run, r, target, gid=gid)
+    if g is None:
+        if verbose:
+            print("no Gamma clusters in this run")
+        return None
+    df = reference_contributions(run, g, min_overlap_frac=min_overlap_frac)
+    R = len(run["nXs"])
+    if not len(df):
+        if verbose:
+            print(f"cluster {g}: no reference produced an overlapping EE cluster")
+        return {"gid": g, "table": df}
+
+    grid = run["grid"]; h = grid["cell_h"]
+    ref_ids = list(run["parts"]["ref_ids"])
+    if space == "sky":
+        for _, row in df.iterrows():
+            j = int(row["ref"])
+            cid = ref_ids[j]
+            rc, dc = akd.cell_center_from_id(grid["ra0"], grid["dec0"], cid, h)
+            rc = grid["ra0"] + akd.wrap_dra_deg(np.asarray([rc], float), grid["ra0"])[0]
+            ax.add_patch(plt.Rectangle((rc - h, dc - h), 2 * h, 2 * h, fill=True,
+                                       fc=colour, ec=colour, lw=2.0, alpha=alpha_fill,
+                                       zorder=1.5))
+            ax.add_patch(plt.Rectangle((rc - h, dc - h), 2 * h, 2 * h, fill=False,
+                                       ec=colour, lw=2.0, zorder=4))
+            if show_labels:
+                ax.text(rc, dc + 0.86 * h,
+                        f"R{j}  z={row['z_EE']:.1f}  Z={row['Z_LiMa']:.1f}",
+                        ha="center", va="top", fontsize=fontsize, color=colour,
+                        weight="bold", zorder=10,
+                        bbox=dict(fc="w", ec=colour, lw=0.8, alpha=0.85, pad=1.4))
+
+    c = combined_significance(run, g, min_overlap_frac=min_overlap_frac)
+    txt = (f"cluster {g}: {c['n_refs']}/{R} refs {c['refs']}\n"
+           f"EE $S/\\sqrt{{\\hat B}}$ = {c['srb_pipeline']:.2f}\n"
+           f"$Z_{{\\rm LiMa}}$ pooled = {c['Z_pooled']:.2f}"
+           + (f", scatter = {c['Z_scatter']:.2f}" if np.isfinite(c["Z_scatter"]) else ""))
+    ax.text(0.985, 0.015, txt, transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=fontsize + 0.5, zorder=11,
+            bbox=dict(fc="w", ec=colour, lw=1.0, alpha=0.9, pad=3.0))
+
+    if verbose:
+        print(f"cluster {g} (|A|={c['S']}): {c['n_refs']}/{R} references contribute")
+        print(df[["ref", "cid", "overlap", "ov_frac", "N_on", "N_off", "alpha",
+                  "B_hat", "z_EE", "Z_LiMa"]].to_string(index=False,
+                  float_format=lambda v: f"{v:.3g}"))
+        print(f"  tiles highlighted: {[ref_ids[int(j)] for j in df['ref']]}"
+              f"   (of {ref_ids})")
+    return {"gid": g, "table": df, "combined": c}
+
+
+def label_reference_tiles(ax, run, gid=None, r=None, target=None, *, stat="z_EE",
+                          corner="lower left", pad=0.06, fontsize=8,
+                          colour="tab:red", dim="0.45", box=True, outline=True,
+                          verbose=False):
+    """Write EagleEye's per-reference S/sqrt(B) into the corner of each reference tile.
+
+    One number per tile of the 3x3, in the same spirit as the equalised-reference
+    outline that plot_field already draws. References that produced an EE cluster
+    overlapping the anomaly are drawn in `colour` and outlined; the rest are dimmed,
+    and show their whole-reference 'Total' estimate when EE_books are available
+    (keep_heavy=True), otherwise a dash.
+
+    stat : "z_EE"   EagleEye's own (N_on - B_hat)/sqrt(B_hat) for that reference
+           "lima"   Li & Ma on the same repechage sets
+           "both"   "z / Z"
+
+    Call it straight after plot_field, which returns its ax:
+        ax = plot_field(run_s, SCAN_R, neigh_s, field_cat_s, space="sky")
+        wt.label_reference_tiles(ax, run_s, r=SCAN_R, target=TARGET)
+    """
+    import analyze_known_dwarfs as akd
+    import matplotlib.pyplot as plt
+
+    g = match_cluster_to_target(run, r, target, gid=gid)
+    df = reference_contributions(run, g) if g is not None else pd.DataFrame()
+    got = {int(row["ref"]): row for _, row in df.iterrows()} if len(df) else {}
+
+    grid = run["grid"]; h = grid["cell_h"]
+    ref_ids = list(run["parts"]["ref_ids"])
+    srb_by_ref = run.get("SrootB_by_ref")
+
+    def _fmt(j):
+        if j in got:
+            row = got[j]
+            if stat == "z_EE":   return f"{row['z_EE']:.1f}", True
+            if stat == "lima":   return f"{row['Z_LiMa']:.1f}", True
+            return f"{row['z_EE']:.1f} / {row['Z_LiMa']:.1f}", True
+        if srb_by_ref is not None:
+            try:
+                tot = float(srb_by_ref[j]["s/root(B)"]["Total"])
+                return f"({tot:.1f})", False          # whole-reference, not this cluster
+            except Exception:
+                pass
+        return "--", False
+
+    for j, cid in enumerate(ref_ids):
+        rc, dc = akd.cell_center_from_id(grid["ra0"], grid["dec0"], cid, h)
+        rc = grid["ra0"] + akd.wrap_dra_deg(np.asarray([rc], float), grid["ra0"])[0]
+        txt, contrib = _fmt(j)
+        col = colour if contrib else dim
+        if outline and contrib:
+            ax.add_patch(plt.Rectangle((rc - h, dc - h), 2 * h, 2 * h, fill=False,
+                                       ec=colour, lw=1.8, zorder=4))
+        # RA axis is inverted, so "left" on screen is the LARGER RA
+        if "left" in corner:
+            x, ha = rc + h * (1 - pad), "left"
+        else:
+            x, ha = rc - h * (1 - pad), "right"
+        y, va = ((dc - h * (1 - pad), "bottom") if "lower" in corner
+                 else (dc + h * (1 - pad), "top"))
+        ax.text(x, y, f"R{j} {txt}", ha=ha, va=va, fontsize=fontsize, color=col,
+                weight=("bold" if contrib else "normal"), zorder=10,
+                bbox=(dict(fc="w", ec=col, lw=0.7, alpha=0.85, pad=1.2) if box else None))
+        if verbose:
+            print(f"  tile cell{cid} (ref {j}): {txt}"
+                  + ("  <- contributes" if contrib else ""))
+    return {"gid": g, "table": df}

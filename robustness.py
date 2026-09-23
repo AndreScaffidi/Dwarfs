@@ -191,6 +191,7 @@ def required_query_halfwidths(anomaly, cfgs, margin=0.2):
 # 2  + per-reference equalisation detail
 # 3  + EagleEye's own chatter (Soar / KNN / Repechage / Math objects)
 VERBOSITY = 1
+SHOW_CONTRIBUTIONS = True   # per-reference Li&Ma line under every run_summary
 
 
 def _q(level=3):
@@ -221,6 +222,16 @@ def run_summary(run, label="", t=None):
     if t is not None:
         parts.append(f"{t:.0f}s")
     print("  " + " | ".join(x for x in parts if x), flush=True)
+    # Per-reference accounting. |A_Gamma|/sqrt(B_w) hides two things that matter:
+    # how many of the R references actually produced a cluster here, and that EE's
+    # own z omits the control-sample variance. Both are printed per cluster.
+    if SHOW_CONTRIBUTIONS and cl:
+        try:
+            import wake_test as _wt
+            for _g in sorted(cl):
+                print("      " + _wt.contribution_line(run, _g), flush=True)
+        except Exception as _e:
+            print(f"      (contribution report unavailable: {type(_e).__name__})")
 
 
 # The X-side statistic saturates. Upsilon is -log of a binomial right-tail p-value on
@@ -1050,7 +1061,7 @@ def _contour(ax, x, y, colour, label, levels=(0.5,), grid=120, pad_bw=3.5):
 
 def plot_scan_overlay(r, anomaly, runs, cfgs, figsize=(15.5, 7.0), levels=(0.5,),
                       sky_half=2.0, pm_half=None, n_bg=120000, show_A0=False,
-                      show_roi=True, bg_kw=None):
+                      show_roi=True, bg_kw=None, stat="both", show_nrefs=True):
     """Contours of the recovered anomaly from every configuration, overlaid.
 
     The whole field within `sky_half` degrees (on the sky) of the anomaly is drawn in
@@ -1058,6 +1069,20 @@ def plot_scan_overlay(r, anomaly, runs, cfgs, figsize=(15.5, 7.0), levels=(0.5,)
     rather than against the handful of points that define them.
 
     sky_half : half-width of the displayed sky region, in degrees ON THE SKY
+    stat : which local significance goes in each contour's legend entry.
+        "pipeline"  |A_Gamma| / sqrt(B_w), the overlap-weighted estimator. Note it
+                    does NOT subtract the background, so it has a null floor of
+                    sqrt(B) and reads high by roughly a factor of two.
+        "lima"      Z_LiMa pooled over the references that produced a cluster,
+                    computed on EagleEye's own repechage sets (ON = Repechaged,
+                    OFF = the injected Background sample, alpha = the Eq.9
+                    cardinality ratio). Background-subtracted and it accounts for
+                    the control-sample variance.
+        "both"      both, for comparison (default).
+        "none"      neither; just the counts.
+    show_nrefs : append "k/R refs" -- how many references produced an overlapping
+        EE cluster at all. A contour held up by 2 of 8 references is a different
+        claim from one held up by all 8, and that is invisible in either statistic.
                (the RA axis is widened by 1/cos(dec) internally).
     pm_half  : half-width of the PM panel; None uses the full range of the drawn stars.
     show_A0  : also mark the individual target stars.
@@ -1116,9 +1141,26 @@ def plot_scan_overlay(r, anomaly, runs, cfgs, figsize=(15.5, 7.0), levels=(0.5,)
             _srb = float(_srb)
         except (TypeError, ValueError):
             _srb = np.nan
-        _lab = (f"{lab}  n={best.size}, {nbest}/{len(A0)} of $A_0$, "
-                + (rf"$S/\sqrt{{\hat B}}$={_srb:.1f}" if np.isfinite(_srb)
-                   else r"$S/\sqrt{\hat B}$=--"))
+        # Per-reference accounting, only computed if it will be shown.
+        _nref, _zlm = None, np.nan
+        if stat in ("lima", "both") or show_nrefs:
+            try:
+                import wake_test as _wt
+                _c = _wt.combined_significance(run, best_gid)
+                _nref, _zlm = _c["n_refs"], _c["Z_pooled"]
+            except Exception:
+                pass
+
+        _bits = [f"{lab}  n={best.size}, {nbest}/{len(A0)} of $A_0$"]
+        if stat in ("pipeline", "both"):
+            _bits.append(rf"$S/\sqrt{{\hat B}}$={_srb:.1f}" if np.isfinite(_srb)
+                         else r"$S/\sqrt{\hat B}$=--")
+        if stat in ("lima", "both"):
+            _bits.append(rf"$Z_{{\rm LiMa}}$={_zlm:.1f}" if np.isfinite(_zlm)
+                         else r"$Z_{\rm LiMa}$=--")
+        if show_nrefs and _nref is not None:
+            _bits.append(f"{_nref}/{len(run['nXs'])} refs")
+        _lab = ", ".join(_bits)
 
         _contour(a1, ra[best], dec[best], col[lab], _lab, levels)
         _contour(a2, pmra[best], pmdec[best], col[lab], _lab, levels)
