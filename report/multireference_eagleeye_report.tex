@@ -30,6 +30,39 @@
 \setlength{\parindent}{0pt}
 
 % --- shorthands -------------------------------------------------------
+\newcommand{\unit}[1]{\ensuremath{\,\mathrm{#1}}}
+\newcommand{\degsq}{\unit{deg^2}}
+\newcommand{\masyr}{\unit{mas\,yr^{-1}}}
+\newcommand{\pmvec}{\boldsymbol{\mu}}
+\newcommand{\pmra}{\mu_{\alpha*}}
+\newcommand{\pmdec}{\mu_{\delta}}
+\newcommand{\Nchance}{\mathcal{N}_{\mathrm{ch}}}
+\newcommand{\Yset}{\mathcal{Y}}
+\newcommand{\Xset}{\mathcal{X}}
+
+% ---- packages these rely on --------------------------------------------------
+% \usepackage{amsmath,amssymb}
+% \usepackage{bm}          % \bm gives proper bold math italic; \boldsymbol also works
+
+% ---- vectors -----------------------------------------------------------------
+\newcommand{\vb}[1]{\bm{#1}}                 % one place to change the vector style
+\newcommand{\gvec}{\vb{g}}                   % density-gradient vector
+\newcommand{\dvec}{\vb{d}}                   % reference-tile offset from Y's centre
+\newcommand{\uvec}{\vb{u}}                   % position WITHIN a tile (local frame)
+\newcommand{\xvec}{\vb{x}}                   % position in the field frame
+
+% ---- sets --------------------------------------------------------------------
+\newcommand{\Ycal}{\mathcal{Y}}              % test tile
+\newcommand{\Xcal}{\mathcal{X}}              % reference tile; use \Xcal^{(j)}
+
+% ---- statistics --------------------------------------------------------------
+\newcommand{\Ups}{\Upsilon}                  % EagleEye per-reference score
+\newcommand{\Gam}{\Gamma}                    % stacked score, \Gam = \sum_j \Ups^{(j)}
+\newcommand{\eps}{\varepsilon}               % residual log density ratio
+\newcommand{\Ocal}{\mathcal{O}}              % order symbol
+\newcommand{\phat}{\hat{p}}                  % null Y-fraction n_Y/(n_Y+n_X)
+
+
 \newcommand{\Ups}{\Upsilon}
 \newcommand{\Gam}{\Gamma}
 \newcommand{\Gstar}{\Gamma^{\star}}
@@ -39,6 +72,7 @@
 \newcommand{\Ycal}{\mathcal{Y}}
 \newcommand{\Xcal}{\mathcal{X}}
 \newcommand{\masyr}{\mathrm{mas\,yr^{-1}}}
+\newcommand{\dvec}{\vec{d}}
 \newcommand{\dg}{^{\circ}}
 \newcommand{\Gaia}{\textit{Gaia}}
 
@@ -53,8 +87,7 @@
   {\endMakeFramed\par\smallskip}
 
 \title{\bfseries Multi-Reference EagleEye for Stellar Overdensity\\
-       Detection in \Gaia\\[0.35em]
-       \large\mdseries Method definition, reference handling, and thresholding}
+       Detection in \Gaia }
 \author{}
 \date{}
 
@@ -62,26 +95,17 @@
 \maketitle
 \vspace{-3.2em}
 
-\begin{callout}
-\textbf{Internal technical report --- for project collaborators. Not a submission draft.}
-
-\smallskip
-Draft of 20 September 2026. Section~\ref{sec:calib} (Calibration) is deliberately incomplete and
-is marked as such.
-\end{callout}
 
 \tableofcontents
 \bigskip
 \hrule
 
 % =====================================================================
-\section{Purpose and scope}
+\section{Introduction}
 \label{sec:purpose}
 
-This report documents how we apply EagleEye (Springer et al.\ 2025) to \Gaia\ DR3 phase-space
-data to search for localised stellar overdensities, and how every threshold in that pipeline is
-set. It is written so that a collaborator can reproduce a run from the configuration table in
-Section~\ref{sec:config} and audit any flagged star back to the threshold that admitted it.
+We apply EagleEye (Springer et al.\ 2025) to \Gaia\ DR3 phase-space
+data to search for localised stellar overdensities.
 
 Three things are established here. First, the \emph{multi-reference construction}: we compare a
 test field against eight empirical neighbouring sky tiles rather than against a background model,
@@ -208,10 +232,6 @@ Appendix~\ref{app:reserved} is reserved for it. Nothing in this report depends o
 all runs presented are balanced ($n_X \approx n_Y$), which is the regime least sensitive to it.
 \end{callout}
 
-\subsection{What is inherited and what is new}
-\label{sec:inherited}
-
-This report circulates among EagleEye's authors, so the boundary should be explicit.
 
 \begin{table}[h]
 \centering\small
@@ -369,21 +389,135 @@ instead (Sections~\ref{sec:refhandling} and~\ref{sec:bootes}).
 We partition a square field into a $3\times3$ grid of tiles of half-width $h$. The central tile is
 the test sample $\Ycal$; the eight surrounding tiles are reference samples $\Xcal^{(j)}$,
 $j = 1,\dots,8$. Every reference is real sky, observed by the same instrument, subject to the same
-selection function, at almost the same position on the sky.
+selection function, at almost the same position on the sky. The fundamental assumption is that the local underlying background density is the same across all $\Xcal^{(j)}$. 
 
 The arrangement is chosen so that the references bracket the test tile symmetrically. Four
 antipodal pairs (E/W, N/S, and the two diagonals) surround $\Ycal$, so that a \emph{linear} density
 gradient across the field contributes equally and oppositely to the members of each pair and
-cancels in the mean.
-
-That cancellation is only partial, and it is important to say why immediately.
+cancels in the mean. That cancellation is only partial, and it is important to say why immediately.
 $\Gam = \sum_j \Ups^{(j)}$ is a sum of a non-negative, convex statistic. A linear gradient cancels
-in the \emph{mean} of the underlying densities but not in the sum of the rectified scores: the tile
-on the sparser side contributes a positive $\Ups$ which the denser side cannot offset by
+in the \emph{mean} of the underlying densities but not in the sum of the rectified scores: the tile on the sparser side contributes a positive $\Ups$ which the denser side cannot offset by
 contributing a negative one, because $\Ups \ge 0$. A strong gradient therefore leaves a one-sided
 residual along whichever edge of $\Ycal$ faces the sparser references. This is the motivation for
-the geometric tests in Section~\ref{sec:scan}, and it is one of the artefacts the method-level
-nulls in Section~\ref{sec:nulls} are designed to expose.
+the geometric perturbation tests in Section~\ref{sec:scan} in which the test set tile $\Ycal$ is shifted in RA and DEC.
+
+
+\subsubsection{Why antipodal bracketing cancels a gradient only partially}
+
+\paragraph{Setup.}
+Work in the local frame of the test tile, $\Ycal$ centred at the origin, with the
+eight references $\Xcal^{(j)}$ at offsets $\dvec_j$ arranged in four antipodal pairs:
+for each $j$ there is a $j'$ with $\dvec_{j'}=-\dvec_j$. Let the smooth surface
+density over the $3\times3$ field be, to first order,
+%
+\begin{equation}
+\rho(\xvec) \;=\; \rho_0\left(1+\gvec\cdot\xvec\right)+\Ocal(|\xvec|^2),
+\qquad |\gvec\cdot\xvec|\ll1 .
+\end{equation}
+%
+Each tile is normalised separately, since $\hat p_j=n_Y/(n_Y+n_{X_j})$ absorbs its
+mean density. Writing $\uvec$ for position within a tile, the normalised densities are
+%
+\begin{equation}
+f_Y(\uvec)=\frac{1+\gvec\cdot\uvec}{V},
+\qquad
+f_{X_j}(\uvec)=\frac{1}{V}\left(1+\frac{\gvec\cdot\uvec}{1+\gvec\cdot\dvec_j}\right),
+\end{equation}
+%
+so the residual log-ratio that survives the per-tile normalisation is
+%
+\begin{equation}
+\eps_j(\uvec)\;\equiv\;\log\frac{f_Y(\uvec)}{f_{X_j}(\uvec)}
+\;=\;(\gvec\cdot\uvec)(\gvec\cdot\dvec_j)+\Ocal(g^3).
+\label{eq:eps}
+\end{equation}
+%
+The essential property is the sign structure, not the order: $\eps_j$ is
+\emph{odd} in $\dvec_j$, hence
+%
+\begin{equation}
+\eps_{j'}(\uvec)=-\eps_j(\uvec).
+\label{eq:odd}
+\end{equation}
+%
+(Without per-tile normalisation the residual would instead be $\Ocal(g)$, but still
+odd in $\dvec_j$; everything below depends only on Eq.~\eqref{eq:odd}.)
+Let $\Delta_j(\uvec)$ denote the corresponding standardised neighbour-composition
+excess, so that $\Delta_{j'}=-\Delta_j$ likewise.
+
+\paragraph{Lemma (the score is convex, not merely non-negative).}
+For fixed $k$, $\Ups=-\log P\!\left(\mathrm{Bin}(k,\hat p)\ge n_k\right)$. Writing this
+as $\psi(\Delta)=-\log Q(\Delta)$ with $Q$ the upper-tail function of the
+null composition,
+%
+\begin{equation}
+\psi'(\Delta)=\frac{q(\Delta)}{Q(\Delta)}\;=\;h(\Delta),
+\end{equation}
+%
+the hazard function of the null. The binomial (and its Gaussian limit) is
+log-concave, and the hazard of a log-concave density is non-decreasing; therefore
+%
+\begin{equation}
+\psi\ge0,\qquad \psi'\ge0,\qquad \psi''\ge0 .
+\label{eq:convex}
+\end{equation}
+%
+Convexity is thus a theorem, not an assumption. Since $\Ups_i=\max_{k\in[20,K_M)}\psi_k$
+and a pointwise maximum of convex functions is convex, Eq.~\eqref{eq:convex} survives
+the scan over $k$.
+
+\paragraph{Proposition (the pedestal).}
+For an antipodal pair, Eqs.~\eqref{eq:odd} and \eqref{eq:convex} give
+%
+\begin{equation}
+\Ups^{(j)}+\Ups^{(j')}=\psi(\Delta)+\psi(-\Delta)\;\ge\;2\,\psi(0),
+\label{eq:jensen}
+\end{equation}
+%
+by Jensen, with equality iff $\Delta=0$. The underlying densities cancel in the
+\emph{mean} --- $\tfrac12(\bar\rho_j+\bar\rho_{j'})=\rho_0$ exactly at first order ---
+but the sum of the \emph{rectified} scores does not. A linear statistic would give
+$\Delta+(-\Delta)=0$; the convex one gives a strictly positive excess.
+
+\paragraph{Two regimes.}
+Expanding Eq.~\eqref{eq:jensen} about $\Delta=0$,
+%
+\begin{equation}
+\Gam_{\mathrm{pair}}-2\psi(0)\;\simeq\;\psi''(0)\,\Delta^2+\Ocal(\Delta^4),
+\label{eq:weak}
+\end{equation}
+%
+so a \emph{weak} gradient contributes a pedestal that is \emph{quadratic} in the
+gradient strength and \emph{symmetric}: both edges of $\Ycal$ along $\gvec$ are
+affected equally. For a \emph{strong} gradient the asymmetry of $\psi$ takes over.
+Since $\psi(\Delta)\sim\Delta^2/2$ as $\Delta\to+\infty$ while $\psi(\Delta)\to0$ as
+$\Delta\to-\infty$,
+%
+\begin{equation}
+\psi(\Delta)+\psi(-\Delta)\;\longrightarrow\;\psi(|\Delta|)
+\qquad (|\Delta|\gtrsim1),
+\end{equation}
+%
+i.e.\ the pair contributes \emph{only} through whichever reference makes $\Ycal$ look
+overdense. By Eq.~\eqref{eq:eps} that is the sparser reference
+($\gvec\cdot\dvec_j<0$), and its contribution is positive where
+$\gvec\cdot\uvec<0$. The residual is therefore one-sided, concentrated on the edge of
+$\Ycal$ facing the sparser references. Full rectification, not partial cancellation.
+
+\paragraph{Corollary (stacking versus pooling).}
+The same inequality separates the two combination schemes. Stacking rectifies then
+sums; pooling averages the densities first and rectifies once. By Jensen,
+%
+\begin{equation}
+\frac{1}{R}\sum_{j}\psi(\Delta_j)\;\ge\;\psi\!\left(\bar\Delta\right),
+\qquad \bar\Delta=\frac1R\sum_j\Delta_j ,
+\end{equation}
+%
+so a reference-level perturbation that averages to zero survives stacking and is
+removed by pooling. This is the mechanism behind the measured contamination
+asymmetry (stacked false-alarm inflation $75\times$ against pooled $37\times$): the
+pedestal is additive and undiluted under $\Gam$.
+
 
 \subsection{Robust scaling}
 \label{sec:scaling}
@@ -420,7 +554,7 @@ of $1.7$ between these two fields at fixed $h$ purely through declination, while
 constant to 4 per cent. The position-to-PM weighting of the Euclidean metric is consequently
 \emph{not} a property of the method but of where and at what scale it is pointed.
 
-Two consequences. When comparing configurations at different $h$ --- as the robustness scan does
+Two consequences emerge. When comparing configurations at different $h$ --- as the robustness scan does
 --- the metric must be frozen from one configuration and reused, or the scan measures a changing
 distance function rather than a changing box. And because the DBSCAN radius $\epsilon$ is expressed
 in these scaled units, freezing the metric is also what makes a fixed $\epsilon$ correspond to a
@@ -1265,5 +1399,387 @@ outstanding item.
 \item Tan C.~Y. et al., 2026, ApJ, 1000, 87
 \item Vasiliev E., Baumgardt H., 2021, MNRAS, 505, 5978
 \end{list}
+
+
+\section{Chance clustering for a given test patch}
+
+Throughout, the test patch is the central tile $\Yset$ of the $3\times3$ grid, and
+all quantities are measured in physical (unscaled) units unless stated otherwise.
+
+\begin{table}[h]
+\centering
+\caption{Notation. The symbol $\pmvec$ denotes proper motion throughout; the
+Poisson mean is written $\nu$ rather than the more usual $\mu$ to avoid a clash.
+Quantities marked \emph{measured} are taken from the data and require no model.}
+\label{tab:notation}
+\small
+\begin{tabular}{@{}llp{8.1cm}@{}}
+\toprule
+Symbol & Units & Meaning \\
+\midrule
+\multicolumn{3}{@{}l}{\itshape Patch and field} \\
+$n$              & ---            & number of stars in the test patch $\Yset$ \\
+$A$              & $\mathrm{deg}^2$     & angular area of the test patch \\
+$d$              & kpc       & assumed heliocentric distance of the candidate \\
+$\pmvec=(\pmra,\pmdec)$ & $\mathrm{mas\,yr}^{-1}$ & proper-motion vector \\
+$(\Delta\alpha\cos\delta,\,\Delta\delta)$ & deg & sky offsets from the patch centre \\
+\midrule
+\multicolumn{3}{@{}l}{\itshape Clump and cell} \\
+$m$              & ---            & number of clump members inside the joint cell \\
+$\Delta\mu$      & $\mathrm{mas\,yr}^{-1}$& radius of the proper-motion cell \\
+$\theta$         & deg       & angular radius of the sky cell \\
+$r_{\mathrm{phys}}$ & pc     & physical radius, $r_{\mathrm{phys}}=\theta\,d$ (small angle) \\
+$q$              & ---            & aperture fraction: the cell radii are the $q$-quantiles of the member distances from the clump centroid \\
+$N_{\mathrm{ap}}$& ---            & number of apertures $q$ scanned \\
+\midrule
+\multicolumn{3}{@{}l}{\itshape Statistics} \\
+$f_\mu(\Delta\mu)$ & ---          & \emph{measured}: fraction of \emph{field} stars whose proper motion lies within $\Delta\mu$ of the clump's mean proper motion \\
+$\nu$            & ---            & expected number of \emph{background} stars in the joint (PM $\times$ sky) cell \\
+$N_{\mathrm{cells}}$ & ---        & number of independent joint cells tiling the patch; the look-elsewhere trials factor, $N_{\mathrm{cells}}=n/\nu$ \\
+$P_{\mathrm{loc}}$ & ---          & local Poisson upper-tail probability, $P(\mathrm{Pois}(\nu)\ge m)$ \\
+$\Nchance$       & ---            & expected number of chance clumps in the patch, look-elsewhere corrected \\
+$\theta_{\mathrm{ur}}$, $r_{\mathrm{ur}}$ & deg, pc & ``unremarkable'' radius: the cell radius at which $\nu=m$ \\
+\midrule
+\multicolumn{3}{@{}l}{\itshape Concentration statistic (Sec.~\ref{sec:conc})} \\
+$k$              & ---            & number of \emph{field} stars inside the proper-motion cell, $k \simeq n f_\mu$ \\
+$c$              & ---            & largest number of those $k$ stars inside any sky disc of radius $\theta$ \\
+$\nu_k$          & ---            & single-disc expectation for those $k$ stars, $\nu_k = k\pi\theta^2/A$ \\
+$z$              & ---            & standardised scan statistic, $z=(c-\nu_k)/\sqrt{\nu_k}$ \\
+\midrule
+\multicolumn{3}{@{}l}{\itshape Pipeline quantities referenced} \\
+$\Upsilon_i^{(j)}$ & ---          & EagleEye anomaly score of point $i$ against reference $j$ \\
+$\Gamma_i$       & ---            & stacked score, $\Gamma_i=\sum_{j=1}^{R}\Upsilon_i^{(j)}$ \\
+$A_\Gamma$       & ---            & set of points with $\Gamma_i>\Gamma^\star$ \\
+$r_h$            & pc        & half-light radius of a stellar system \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{The separable null}
+% =====================================================================
+
+The hypothesis under test is not ``is there an overdensity'' but the narrower,
+physically specific question:
+
+\begin{quote}
+\itshape
+Given that the Galactic field has a strongly concentrated proper-motion
+distribution, how often will $m$ stars that happen to share a proper-motion cell
+\emph{also} fall within a small patch of sky, with no dynamical association
+whatsoever?
+\end{quote}
+
+The corresponding null is \emph{separable}: proper motions are drawn from the
+field's own (highly non-uniform) distribution, while sky positions are independent
+and uniform over the patch,
+%
+\begin{equation}
+p(\Delta\alpha\cos\delta,\,\Delta\delta,\,\pmvec)
+\;=\;
+\underbrace{\frac{1}{A}}_{\text{uniform on the sky}}
+\times
+\underbrace{p(\pmvec)}_{\text{measured from the field}} .
+\label{eq:separable}
+\end{equation}
+%
+Separability is what makes this the right null for the question: it retains
+\emph{all} of the real proper-motion clustering and removes \emph{only} the
+position--velocity correlation that a bound system would produce.
+
+For a joint cell of proper-motion radius $\Delta\mu$ and sky radius $\theta$, the
+expected number of background stars satisfying both conditions is
+%
+\begin{equation}
+\boxed{\;
+\nu(\Delta\mu,\theta)
+\;=\;
+n \;\cdot\; f_\mu(\Delta\mu) \;\cdot\; \frac{\pi\theta^{2}}{A}
+\;}
+\label{eq:nu}
+\end{equation}
+%
+where the three factors are, respectively, the patch richness, the proper-motion
+concentration, and the sky filling fraction. Crucially,
+%
+\begin{equation}
+f_\mu(\Delta\mu)
+\;=\;
+\frac{1}{n_{\mathrm{bg}}}
+\sum_{i \,\in\, \text{field}}
+\mathbf{1}\!\left[\,\left\|\pmvec_i-\bar{\pmvec}_{\mathrm{clump}}\right\| \le \Delta\mu\,\right]
+\label{eq:fmu}
+\end{equation}
+%
+is \emph{measured}, with clump members excluded from the sum so that
+$f_\mu$ estimates the background and not the signal. No Besan\c{c}on model, no
+velocity ellipsoid, and no distance information enters.
+
+The look-elsewhere-corrected expected number of chance clumps is then
+%
+\begin{equation}
+\Nchance(\Delta\mu,\theta)
+\;=\;
+N_{\mathrm{cells}}\;P\!\left(\mathrm{Pois}(\nu) \ge m\right),
+\qquad
+N_{\mathrm{cells}} \;=\; \frac{A}{\pi\theta^{2}}\cdot\frac{1}{f_\mu} \;=\; \frac{n}{\nu} ,
+\label{eq:Nchance}
+\end{equation}
+%
+and a value $\Nchance \gtrsim 1$ means a clump this good is \emph{expected} in
+this patch by chance.
+
+\paragraph{Derivation of Eq.~\eqref{eq:Nchance}.}
+Two independent routes agree. \emph{(i) Cell tiling.} Partition the occupied
+product space into cells of the given size. The sky tiles $A/\pi\theta^{2}$ times;
+a proper-motion cell holding a fraction $f_\mu$ of the stars tiles the occupied
+proper-motion space $1/f_\mu$ times. Their product is $N_{\mathrm{cells}}=n/\nu$
+by Eq.~\eqref{eq:nu}, and each cell independently has $\mathrm{Pois}(\nu)$
+occupancy. \emph{(ii) Star-centred.} Place a cell on each star $i$; the remaining
+$n-1$ stars enter independently with probability $\pi_C=\nu/n$, so the cell holds
+$1+\mathrm{Bin}(n-1,\pi_C)$ stars and is flagged with probability
+$P(\mathrm{Pois}(\nu)\ge m-1)$ --- note $m-1$, because the centre star is itself
+one of the $m$. Linearity of expectation gives $n\,P(\mathrm{Pois}(\nu)\ge m-1)$
+flagged centres \emph{exactly}, despite the cells overlapping; a genuine clump is
+flagged from each of its $m$ members, so dividing by $m$ de-duplicates. At the
+best aperture of Table~\ref{tab:aperture} route (i) gives $0.155$ and route (ii)
+$0.160$, agreeing to $3\%$. Pairing route (ii)'s trials factor $n/m$ with route
+(i)'s tail $P(\ge m)$ --- a tempting but inconsistent hybrid --- discards a factor
+$\nu/m$ and understates $\Nchance$ by $2.8\times$ here.
+
+\paragraph{Aperture scan.}
+Reporting the minimum over $N_{\mathrm{ap}}$ apertures incurs a trials penalty
+bounded above by Bonferroni. The apertures are \emph{nested}, hence strongly
+positively correlated, so the effective number of independent trials is
+considerably smaller than $N_{\mathrm{ap}}$ --- of order $2$--$3$ for the seven
+used here. We therefore quote the bracket
+%
+\begin{equation}
+\Nchance \;\le\; \Nchance^{\,\mathrm{scan}} \;\le\; N_{\mathrm{ap}}\,\Nchance .
+\label{eq:scanbracket}
+\end{equation}
+
+\paragraph{Product cell versus joint ball.}
+Equation~\eqref{eq:nu} defines a \emph{product} cell --- ``same proper motion
+\textbf{and} same patch of sky'' --- with a fixed, interpretable shape. This is
+deliberately distinct from a ball in the MAD-scaled four-dimensional metric used
+internally by EagleEye. A joint ball \emph{couples} the position and
+proper-motion axes, and a nearest-neighbour construction within it selects
+whichever subset of stars is most concentrated in that coupled metric. For the
+same stars the two constructions can differ by many orders of magnitude; the
+product cell is both the more conservative and the more physically interpretable,
+and is the one quoted here.
+
+\paragraph{What this statistic does \emph{not} measure.}
+Equation~\eqref{eq:Nchance} is a \emph{counting} statistic: it asks only whether
+at least $m$ stars fall inside the cell, and is blind to how they are arranged
+within it. A tight knot at the cell centre and a uniform filling of the cell
+receive identical scores. Concentration enters only indirectly, through the cell
+radii being set by the observed member distances and then scanned --- a crude
+profile fit. Section~\ref{sec:conc} supplements it with a statistic that measures
+concentration directly.
+
+% =====================================================================
+\section{Application to the Reticulum~II field}
+% =====================================================================
+
+Patch parameters: $n=1595$, $A=2.29\degsq$, assumed $d=30\unit{kpc}$
+(so $1^\circ=524\unit{pc}$). The candidate is the single $\Gamma$ cluster of
+the run, with 39 members. Cell radii are set by the $q$-quantiles of the member
+distances from the clump centroid, separately in the proper-motion and sky
+subspaces.
+
+\begin{table}[h]
+\centering
+\caption{Chance-clump expectation as a function of aperture. Each row uses cell
+radii $(\Delta\mu,\theta)$ equal to the $q$-quantiles of the member distances,
+retaining the $m$ members inside \emph{both}. $f_\mu$ is measured with the 39
+clump members excluded from the background. The last two columns bracket the
+aperture-scan penalty as in Eq.~\eqref{eq:scanbracket}. The minimum, marked
+$\dagger$, is the most favourable reading available and still gives $\Nchance$
+between $0.15$ and $1.1$.}
+\label{tab:aperture}
+\small
+\begin{tabular}{@{}ccccc rrrrrr@{}}
+\toprule
+$q$ & $m$ & $\Delta\mu$ & $\theta$ & $r_{\mathrm{phys}}$ & $f_\mu$ & $\nu$
+& $N_{\mathrm{cells}}$ & $P_{\mathrm{loc}}$ & $\Nchance$ & $N_{\mathrm{ap}}\Nchance$ \\
+    &     & [$\mathrm{mas\,yr}^{-1}$] & [deg] & [pc] & & & & & & \\
+\midrule
+0.4 &  8 & 0.409 & 0.194 & 101 & 0.031 &   2.52 & 632 & $4.48\times10^{-3}$ & 2.83 & 19.8 \\
+0.5 & 12 & 0.475 & 0.214 & 112 & 0.040 &   3.95 & 404 & $8.16\times10^{-4}$ & 0.330 & 2.31 \\
+$0.6^{\dagger}$ & 15 & 0.542 & 0.231 & 121 & 0.048 & 5.43 & 294 & $5.27\times10^{-4}$ & \textbf{0.155} & \textbf{1.08} \\
+0.7 & 19 & 0.604 & 0.270 & 142 & 0.055 &   8.63 & 185 & $1.54\times10^{-3}$ & 0.284 & 1.99 \\
+0.8 & 27 & 0.734 & 0.318 & 167 & 0.071 &  15.47 & 103 & $4.91\times10^{-3}$ & 0.506 & 3.54 \\
+0.9 & 33 & 0.948 & 0.398 & 208 & 0.095 &  32.20 &  50 & $4.68\times10^{-1}$ & 23.2 & 162 \\
+1.0 & 39 & 1.882 & 0.549 & 287 & 0.213 & 136.90 &  12 & $1.00\times10^{0}$  & 11.7 & 81.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The proper-motion enhancement.}
+At the best aperture the clump's proper-motion cell is a disc of radius
+$0.542\masyr$, covering $\pi(0.542)^2/100 = 0.92\%$ of the
+$\pm5\masyr$ proper-motion box, yet it contains $f_\mu=4.76\%$ of the
+field. The field is therefore
+%
+\begin{equation}
+\frac{f_\mu}{\pi\Delta\mu^{2}/A_{\pmvec}} \;=\; \frac{0.0476}{0.0092} \;\simeq\; 5.2
+\end{equation}
+%
+times denser in that proper-motion cell than a uniform distribution would give.
+This is precisely the effect of concern: \emph{proper-motion concentration makes
+sky clumping about five times cheaper than a naive uniform estimate}, and it is
+quantified here without recourse to any Galactic model.
+
+% =====================================================================
+\section{A statistic that measures concentration}
+\label{sec:conc}
+% =====================================================================
+
+Take the $k$ stars within $\Delta\mu$ of the clump's mean proper motion, and let
+$c$ be the largest number of them falling inside any disc of radius $\theta$ on
+the sky. Standardising by the single-disc expectation $\nu_k=k\pi\theta^{2}/A$
+gives
+%
+\begin{equation}
+z \;=\; \frac{c-\nu_k}{\sqrt{\nu_k}} .
+\label{eq:zscan}
+\end{equation}
+%
+This responds to \emph{where} the stars sit, not merely how many are present, and
+is standardised so that proper-motion cells of differing occupancy may be
+compared. Critically, $z$ must be calibrated empirically: because $c$ is a
+\emph{maximum} over disc placements, $\mathbb{E}[z]>0$ even for perfectly uniform
+points, and the offset is large.
+
+\begin{table}[h]
+\centering
+\caption{Sky concentration of proper-motion-selected subsamples, measured by
+Eq.~\eqref{eq:zscan} at $\Delta\mu=0.542\,\mathrm{mas\,yr}^{-1}$,
+$\theta=0.231^\circ$. The three nulls are: other proper-motion cells of the same
+radius drawn from the field; $k=97$ points thrown uniformly on the patch; and the
+real sky positions with proper motions permuted. All three give a median of
+$z\simeq2.1$--$2.3$, which is therefore the look-elsewhere offset intrinsic to a
+maximum over disc placements and \emph{not} evidence of real clustering. The
+observed $z=2.95$ is unremarkable against every null.}
+\label{tab:conc}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Sample & trials & median $z$ & 90\% & max $z$ & $p(\ge z_{\mathrm{obs}})$ \\
+\midrule
+\textbf{Observed clump} & --- & \multicolumn{4}{l}{$z_{\mathrm{obs}}=2.95$ \quad($c=15$, $k=97$, $\nu_k=7.12$)} \\
+\midrule
+Other PM cells, field       & 300 & 2.14 & 2.97 & 3.85 & 0.116 \\
+Uniform points, $k=97$      & 300 & 2.20 & 3.33 & 4.45 & 0.223 \\
+PM shuffled, real sky       & 172 & 2.30 & 3.25 & 5.53 & 0.214 \\
+\midrule
+Poisson prediction          & --- & 0    & ---  & ---  & $6.6\times10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two conclusions follow. First, the observed concentration is reached by
+$12$--$22\%$ of randomly placed proper-motion cells, so the clump is not unusually
+concentrated. Second, the single-disc Poisson probability ($6.6\times10^{-3}$) is
+optimistic by a factor of $\sim20$ relative to the empirical rate; the discrepancy
+is the look-elsewhere effect of maximising over disc placements, and is precisely
+what the $N_{\mathrm{cells}}$ factor of Eq.~\eqref{eq:Nchance} exists to absorb.
+Indeed the implied effective trials, $0.15/6.6\times10^{-3}\approx23$, agree in
+order of magnitude with the sky-only tiling number $A/\pi\theta^{2}\approx14$. The
+uniform control is indispensable: without it the median offset of $z\simeq2.2$
+would be mistaken for intrinsic clumpiness of the Galactic field.
+
+% =====================================================================
+\section{Dependence on patch richness}
+% =====================================================================
+
+Holding the clump fixed at the best aperture ($m=15$, $\theta=0.231^\circ$,
+$f_\mu=0.048$) and varying only the patch richness $n$ separates two effects that
+are easily conflated.
+
+\begin{table}[h]
+\centering
+\caption{Chance-clump expectation versus patch richness, for a fixed clump
+($m=15$, $\theta=0.231^\circ$, $f_\mu=0.048$, $A=2.29\degsq$,
+$d=30\unit{kpc}$). Columns 2--4 hold the \emph{angular} scale fixed; columns 5--6
+instead hold the \emph{member count} fixed and solve $\nu=m$ for the radius at
+which the clump ceases to be remarkable. The two halves answer different
+questions and point in opposite directions.}
+\label{tab:richness}
+\small
+\begin{tabular}{@{}r rrr rr@{}}
+\toprule
+$n$ & $\nu$ & $P_{\mathrm{loc}}$ & $\Nchance$
+& $\theta_{\mathrm{ur}}$ [deg] & $r_{\mathrm{ur}}$ [pc] \\
+\midrule
+ 200 &  0.70 & $1.81\times10^{-15}$ & $2.42\times10^{-14}$ & 1.071 & 560.9 \\
+ 500 &  1.75 & $6.35\times10^{-10}$ & $2.12\times10^{-8}$  & 0.678 & 354.7 \\
+1000 &  3.49 & $4.13\times10^{-6}$  & $2.75\times10^{-4}$  & 0.479 & 250.8 \\
+2000 &  6.98 & $5.58\times10^{-3}$  & $7.44\times10^{-1}$  & 0.339 & 177.4 \\
+4000 & 13.96 & $4.26\times10^{-1}$  & $1.14\times10^{2}$   & 0.240 & 125.4 \\
+8000 & 27.92 & $9.97\times10^{-1}$  & $5.32\times10^{2}$   & 0.169 &  88.7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At \emph{fixed angular scale} (column 4), sparse patches produce \emph{fewer}
+chance clumps: there are simply fewer background stars available to fake one, and
+$\Nchance$ falls by fourteen orders of magnitude between $n=8000$ and $n=200$.
+
+At \emph{fixed member count}, however, the radius at which a clump stops being
+remarkable grows as
+%
+\begin{equation}
+\theta_{\mathrm{ur}} \;=\; \sqrt{\frac{m A}{\pi n f_\mu}} \;\propto\; n^{-1/2} .
+\label{eq:thetaur}
+\end{equation}
+%
+Because EagleEye's $k$-nearest-neighbour balls are adaptive, a sparse patch drives
+the method to physically enormous apertures. At $n=200$ any 15-star grouping out
+to $r_{\mathrm{ur}}=561\unit{pc}$ is consistent with background. Since ultra-faint
+dwarfs have $r_h \sim 20\text{--}300\unit{pc}$ (Reticulum~II itself has
+$r_h\approx50\unit{pc}$), the method in that regime cannot distinguish a bound
+system from the field \emph{at any reported significance}, because the statistic
+has no knowledge of parsecs.
+
+\medskip
+\noindent
+This is the useful physical bound: compare $r_{\mathrm{ur}}$ from
+Eq.~\eqref{eq:thetaur} against $r_h$ for the systems of interest. Where the two
+overlap, astrometric significance alone is uninformative.
+
+% =====================================================================
+\section{Summary}
+% =====================================================================
+
+\begin{enumerate}\itemsep2pt
+\item Under the separable null of Eq.~\eqref{eq:separable}, the observed clump has
+      $0.15 \le \Nchance^{\,\mathrm{scan}} \le 1.1$ (Table~\ref{tab:aperture}):
+      of order unity, and therefore not on its own evidence of a bound system.
+\item The counting statistic of Eq.~\eqref{eq:Nchance} is blind to concentration.
+      A direct concentration statistic (Eq.~\ref{eq:zscan}) gives
+      $p=0.12$--$0.22$ against three independent nulls (Table~\ref{tab:conc}),
+      confirming the conclusion by an independent route.
+\item The proper-motion effect is real and quantifiable: the clump's proper-motion
+      cell is $5.2\times$ overdense relative to a uniform proper-motion
+      distribution, so sky clumping is correspondingly cheap.
+\item Sparse patches do not produce more chance clumps; they produce chance clumps
+      that are \emph{too large to be bound systems} (Table~\ref{tab:richness}).
+\item The separable null assumes position--proper-motion independence. If that is
+      violated in the patch, the true chance rate is \emph{higher}, not lower.
+      The eight tiled reference sets $\Xset^{(j)}$ provide the data to test it.
+\end{enumerate}
+
+\paragraph{Implementation.}
+The three estimates are produced by
+\begin{itemize}\itemsep0pt
+\item \texttt{wake\_test.pm\_sky\_chance\_clumps}\quad(Table~\ref{tab:aperture}),
+\item \texttt{wake\_test.pm\_sky\_concentration\_test}\quad(Table~\ref{tab:conc}),
+\item \texttt{wake\_test.chance\_vs\_patch\_richness}\quad(Table~\ref{tab:richness}).
+\end{itemize}
+
+
 
 \end{document}
